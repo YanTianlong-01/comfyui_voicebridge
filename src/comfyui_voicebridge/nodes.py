@@ -175,10 +175,10 @@ folder_paths.add_model_folder_path("Qwen3-TTS-Prompts", QWEN3_TTS_PROMPTS_DIR)
 
 # Model repo mappings
 QWEN3_TTS_MODELS = {
-    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
-    "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    # "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    # "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
     "Qwen/Qwen3-TTS-12Hz-1.7B-Base": "Qwen3-TTS-12Hz-1.7B-Base",
-    "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    # "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "Qwen/Qwen3-TTS-12Hz-0.6B-Base": "Qwen3-TTS-12Hz-0.6B-Base",
 }
 
@@ -345,7 +345,7 @@ class Qwen3ASRLoader:
             elif not (os.path.exists(aligner_local) and os.listdir(aligner_local)):
                 aligner_local = download_model_to_comfyui(forced_aligner, source, "Qwen3-ASR")
             print(f"Loading Force Aligner from local path: {aligner_local}")
-            
+
             model_kwargs["forced_aligner"] = aligner_local
             model_kwargs["forced_aligner_kwargs"] = dict(
                 dtype=dtype,

@@ -32,6 +32,33 @@ cd comfyui_voicebridge
 pip install -r requirements.txt
 ```
 
+### Model Directory Structure
+VoiceBridge automatically searches or download models in the following priority:
+
+```text
+ComfyUI/
+├── models/
+│   └── Qwen3-TTS/
+│   |   ├── Qwen3-TTS-12Hz-1.7B-Base/
+│   |   ├── Qwen3-TTS-12Hz-0.6B-Base/
+│   └── Qwen3-ASR/
+│       ├── Qwen3-ASR-1.7B/
+│       ├── Qwen3-ASR-0.6B/
+│       ├── Qwen3-ForcedAligner-0.6B/
+```
+
+or you can use the local model path. Setting `local_model_path`=`qwen-tts/Qwen3-TTS-12Hz-1.7B-Base` means use the model in `ComfyUI/models/qwen-tts/Qwen3-TTS-12Hz-1.7B-Base`.
+
+For ASR models, you can set `local_model_path_asr`=`qwen-asr/Qwen3-ASR-1.7B`.
+For ForcedAligner models, you can set `local_model_path_fa`=`qwen-asr/Qwen3-ForcedAligner-0.6B`.
 
 
+## Acknowledgments
+
+- [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS): Official open-source repository by Alibaba Qwen team.
+- [ComfyUI-Qwen3-ASR](https://github.com/DarioFT/ComfyUI-Qwen3-ASR): A nice and clean ComfyUI node by DarioFT.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
 
