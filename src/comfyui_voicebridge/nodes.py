@@ -292,7 +292,8 @@ class Qwen3ASRLoader:
             "optional": {
                 "max_new_tokens": ("INT", {"default": 256, "min": 1, "max": 4096, "tooltip": "The maximum number of tokens to generate in the transcription."}),
                 "forced_aligner": (list(QWEN3_FORCED_ALIGNERS.keys()), {"default": "None"}),
-                "local_model_path": ("STRING", {"default": "", "multiline": False}),
+                "local_model_path_asr": ("STRING", {"default": "", "multiline": False, "tooltip": "The local path to the ASR model. If provided, the model will be loaded from this path instead of downloading it from HuggingFace or ModelScope."}),
+                "local_model_path_fa": ("STRING", {"default": "", "multiline": False, "tooltip": "The local path to the forced aligner model. If provided, the model will be loaded from this path instead of downloading it from HuggingFace or ModelScope."}),
             }
         }
 
@@ -301,7 +302,7 @@ class Qwen3ASRLoader:
     FUNCTION = "load_model"
     CATEGORY = "VoiceBridge"
 
-    def load_model(self, repo_id, source, precision, attention, max_new_tokens=256, forced_aligner="None", local_model_path=""):
+    def load_model(self, repo_id, source, precision, attention, max_new_tokens=256, forced_aligner="None", local_model_path_asr="", local_model_path_fa=""):
         device = mm.get_torch_device()
         
         dtype = torch.float32
@@ -314,8 +315,9 @@ class Qwen3ASRLoader:
         elif precision == "fp16":
             dtype = torch.float16
             
-        if local_model_path and local_model_path.strip() != "":
-            model_path = local_model_path.strip()
+        if local_model_path_asr and local_model_path_asr.strip() != "":
+            model_path = local_model_path_asr.strip()
+            model_path = os.path.join(folder_paths.models_dir, model_path)
             print(f"Loading from local path: {model_path}")
         else:
             local_path = get_local_model_path(repo_id, "Qwen3-ASR")
@@ -336,8 +338,14 @@ class Qwen3ASRLoader:
             
         if forced_aligner and forced_aligner != "None":
             aligner_local = get_local_model_path(forced_aligner, "Qwen3-ASR")
-            if not (os.path.exists(aligner_local) and os.listdir(aligner_local)):
+            if local_model_path_fa and local_model_path_fa.strip() != "":
+                aligner_local = local_model_path_fa.strip()
+                aligner_local = os.path.join(folder_paths.models_dir, aligner_local)
+                print(f"Loading from local path: {aligner_local}")
+            elif not (os.path.exists(aligner_local) and os.listdir(aligner_local)):
                 aligner_local = download_model_to_comfyui(forced_aligner, source, "Qwen3-ASR")
+            print(f"Loading Force Aligner from local path: {aligner_local}")
+            
             model_kwargs["forced_aligner"] = aligner_local
             model_kwargs["forced_aligner_kwargs"] = dict(
                 dtype=dtype,
@@ -436,6 +444,7 @@ class Qwen3TTSLoader:
             
         if local_model_path and local_model_path.strip() != "":
             model_path = local_model_path.strip()
+            model_path = os.path.join(folder_paths.models_dir, model_path)
             print(f"Loading from local path: {model_path}")
         else:
             local_path = get_local_model_path(repo_id, "Qwen3-TTS")
