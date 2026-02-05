@@ -36,7 +36,7 @@ Documentation = "https://github.com/YanTianlong-01/comfyui_voicebridge/wiki"
 
 
 [tool.comfy]
-PublisherId = "YanTianlong-01"
+PublisherId = "sevnfading"
 DisplayName = "ComfyUI-VoiceBridge"
 Icon = ""
 Tags = []
