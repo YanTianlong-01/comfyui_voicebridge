@@ -1,0 +1,9 @@
+torch
+numpy
+qwen-asr
+transformers
+accelerate
+modelscope
+soundfile
+openai
+tempfile
