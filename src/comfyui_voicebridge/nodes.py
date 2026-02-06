@@ -885,11 +885,11 @@ class OpenAIAPI:
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
     "GenerateSRT": GenerateSRT,
-    "Qwen3ASRLoaderVB": Qwen3ASRLoader,
-    "Qwen3ASRTranscribeVB": Qwen3ASRTranscribe,
-    "OenAIAPIVB": OpenAIAPI,
+    "VoiceBridgeASRLoader": Qwen3ASRLoader,
+    "VoiceBridgeASRTranscribe": Qwen3ASRTranscribe,
+    "VoiceBridgeAIAPI": OpenAIAPI,
     "SaveSRTFromString": SaveSRTFromString,
-    "Qwen3TTSLoaderVB": Qwen3TTSLoader,
+    "VoiceBridgeTTSLoader": Qwen3TTSLoader,
     "VoiceClonePrompt": VoiceClonePrompt,
     "SRTToAudio": SRTToAudio,
 
@@ -898,11 +898,11 @@ NODE_CLASS_MAPPINGS = {
 # A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {
     "GenerateSRT": "Generate SRT",
-    "Qwen3ASRLoaderVB": "Qwen3-ASR Loader VoiceBridge",
-    "Qwen3ASRTranscribeVB": "Qwen3-ASR Transcribe VoiceBridge",
-    "OenAIAPIVB": "OpenAI API VoiceBridge",
+    "VoiceBridgeASRLoader": "VoiceBridge ASR Loader",
+    "VoiceBridgeASRTranscribe": "VoiceBridge ASR Transcribe",
+    "VoiceBridgeAIAPI": "VoiceBridge AI API",
     "SaveSRTFromString": "Save SRT From String",
-    "Qwen3TTSLoaderVB": "Qwen3-TTS Loader VoiceBridge",
+    "VoiceBridgeTTSLoader": "VoiceBridge TTS Loader",
     "VoiceClonePrompt": "Voice Clone Prompt",
     "SRTToAudio": "SRT To Audio",
 }
