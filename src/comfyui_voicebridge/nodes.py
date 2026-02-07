@@ -264,14 +264,14 @@ def migrate_cached_model(repo_id: str, target_path: str) -> bool:
             snapshots = os.listdir(snapshots_dir)
             if snapshots:
                 source = os.path.join(snapshots_dir, snapshots[0])
-                print(f"Migrating model from HuggingFace cache: {source} -> {target_path}")
+                print(f"[VoiceBridge] Migrating model from HuggingFace cache: {source} -> {target_path}")
                 shutil.copytree(source, target_path, dirs_exist_ok=True)
                 return True
     
     ms_cache = os.path.join(os.path.expanduser("~"), ".cache", "modelscope", "hub")
     ms_model_dir = os.path.join(ms_cache, repo_id.replace("/", os.sep))
     if os.path.exists(ms_model_dir):
-        print(f"Migrating model from ModelScope cache: {ms_model_dir} -> {target_path}")
+        print(f"[VoiceBridge] Migrating model from ModelScope cache: {ms_model_dir} -> {target_path}")
         shutil.copytree(ms_model_dir, target_path, dirs_exist_ok=True)
         return True
     
@@ -282,18 +282,18 @@ def download_model_to_comfyui(repo_id: str, source: str, type: str = "Qwen3-ASR"
     target_path = get_local_model_path(repo_id, type)
     
     if migrate_cached_model(repo_id, target_path):
-        print(f"Model available at: {target_path}")
+        print(f"[VoiceBridge] Model available at: {target_path}")
         return target_path
     
     os.makedirs(target_path, exist_ok=True)
     
     if source == "ModelScope":
         from modelscope import snapshot_download
-        print(f"Downloading {repo_id} from ModelScope to {target_path}...")
+        print(f"[VoiceBridge] Downloading {repo_id} from ModelScope to {target_path}...")
         snapshot_download(repo_id, local_dir=target_path)
     else:
         from huggingface_hub import snapshot_download
-        print(f"Downloading {repo_id} from HuggingFace to {target_path}...")
+        print(f"[VoiceBridge] Downloading {repo_id} from HuggingFace to {target_path}...")
         snapshot_download(repo_id, local_dir=target_path)
     
     return target_path
@@ -569,7 +569,7 @@ class VoiceClonePrompt:
             ref_text=ref_text,
             x_vector_only_mode=False,
         )
-        print("Voice Clone Prompt created successfully!")
+        print("[VoiceBridge] Voice Clone Prompt created successfully!")
         return (result,)
     
 class SRTToAudio:
@@ -584,6 +584,7 @@ class SRTToAudio:
             "optional": {
                 "language": (SUPPORTED_LANGUAGES, {"default": "auto"}),
                 "tempo_limit": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 2.0, "step": 0.1, "tooltip": "Maximum speed-up factor for audio that exceeds subtitle duration"}),
+                "mini_gap_ms" : ("INT", {"default": 100, "min": 0, "max": 1000, "tooltip": "Minimum gap between subtitles in milliseconds"}),
                 "batch_size": ("INT", {"default": 10, "min": 1, "max": 50, "tooltip": "Number of subtitles to process in each batch"}),
             }
         }
@@ -600,6 +601,7 @@ class SRTToAudio:
         voice_clone_prompt, 
         language="auto",
         tempo_limit: float = 1.5,
+        mini_gap_ms: int = 100,
         batch_size: int = 10
     ):
         """
@@ -621,9 +623,9 @@ class SRTToAudio:
             print("[VoiceBridge] Error: Empty SRT string provided")
             return ({"waveform": np.array([[0.0]]), "sample_rate": 16000}, "")
         
-        print(f"Parsing SRT content ({len(srt_string)} chars)...")
+        print(f"[VoiceBridge] Parsing SRT content ({len(srt_string)} chars)...")
         entries = parse_srt_string(srt_string)
-        print(f"Found {len(entries)} subtitle entries")
+        print(f"[VoiceBridge] Found {len(entries)} subtitle entries")
         
         if len(entries) == 0:
             print("[VoiceBridge] Error: No valid subtitle entries found in SRT")
@@ -638,13 +640,13 @@ class SRTToAudio:
         lang = LANGUAGE_MAP.get(language, "auto")
         
         try:
-            print("Starting audio generation...")
+            print("[VoiceBridge] Starting audio generation...")
             for i in range(0, len(entries), batch_size):
                 batch = entries[i:i+batch_size]
                 texts = [e.text for e in batch]
                 paths = [os.path.join(temp_dir, f"audio_{e.index:04d}.wav") for e in batch]
                 
-                print(f"  Generating batch {i//batch_size + 1}: entries {i+1}-{min(i+batch_size, len(entries))}")
+                print(f"[VoiceBridge]   Generating batch {i//batch_size + 1}: entries {i+1}-{min(i+batch_size, len(entries))}")
                 
                 wavs, sr = model.generate_voice_clone(
                     text=texts,
@@ -661,14 +663,14 @@ class SRTToAudio:
                 
                 torch.cuda.empty_cache()
             
-            print("Processing duration mismatches...")
-            self._process_duration(entries, temp_dir, tempo_limit)
+            print("[VoiceBridge] Processing duration mismatches...")
+            self._process_duration(entries, temp_dir, tempo_limit, mini_gap_ms)
             
             last_entry = entries[-1]
             total_duration = last_entry.start_time_ms + last_entry.audio_duration_ms + 1000
             
             # Synthesize the final audio
-            print("Merging audio files...")
+            print("[VoiceBridge] Merging audio files...")
             wav_tensor, sample_rate = merge_audio_files(entries, total_duration)
 
             # Prepare audio output in ComfyUI format
@@ -680,12 +682,12 @@ class SRTToAudio:
             
             # Generate the adjusted SRT string
             adjusted_srt = save_srt_string(entries)
-            print(f"Completed! Output audio: {wav_tensor.shape[-1]} samples at {sample_rate}Hz")
+            print(f"[VoiceBridge] Completed! Output audio: {wav_tensor.shape[-1]} samples at {sample_rate}Hz")
             
             return (audio_output, adjusted_srt)
             
         except Exception as e:
-            print(f"Error during audio conversion: {str(e)}")
+            print(f"[VoiceBridge] Error during audio conversion: {str(e)}")
             import traceback
             traceback.print_exc()
             
@@ -699,7 +701,7 @@ class SRTToAudio:
             silent_audio = {"waveform": torch.zeros(1, 16000), "sample_rate": 16000}
             return (silent_audio, "")
     
-    def _process_duration(self, entries: List[SubtitleEntry], temp_dir: str, tempo_limit: float):
+    def _process_duration(self, entries: List[SubtitleEntry], temp_dir: str, tempo_limit: float, mini_gap_ms: int):
         """
         Handling the issue where the audio duration does not match the subtitle duration
         
@@ -708,6 +710,8 @@ class SRTToAudio:
             temp_dir: Temporary file directory
             tempo_limit: Maximum acceleration multiple
         """
+        gap_ms = mini_gap_ms
+
         for i, entry in enumerate(entries):
             subtitle_duration = entry.end_time_ms - entry.start_time_ms
             audio_duration = entry.audio_duration_ms
@@ -718,23 +722,23 @@ class SRTToAudio:
             else:
                 available_time = subtitle_duration + 5000  # 5 more seconds for safety
             
-            print(f"  [{entry.index}] Subtitle: {subtitle_duration}ms, Audio: {audio_duration}ms, Available: {available_time}ms")
+            print(f"[VoiceBridge]   [{entry.index}] Subtitle: {subtitle_duration}ms, Audio: {audio_duration}ms, Available: {available_time}ms")
             
             if audio_duration <= subtitle_duration:
                 # If the audio is shorter than the subtitle -> adjust the end time of the subtitle
                 new_end_time = entry.start_time_ms + audio_duration
-                print(f"       -> Audio shorter, adjusting end time: {entry.end_time_ms}ms -> {new_end_time}ms")
+                print(f"[VoiceBridge]        -> Audio shorter, adjusting end time: {entry.end_time_ms}ms -> {new_end_time}ms")
                 entry.end_time_ms = new_end_time
                 
             elif audio_duration > available_time:
                 # If the audio is longer than the available time -> speed up the audio
-                speed_factor = audio_duration / available_time
+                speed_factor = audio_duration / (available_time-gap_ms)
                 
                 if speed_factor > tempo_limit:
-                    print(f"       -> Warning: Required speed-up {speed_factor:.2f}x exceeds limit {tempo_limit}x, using limit")
+                    print(f"[VoiceBridge]        -> Warning: Required speed-up {speed_factor:.2f}x exceeds limit {tempo_limit}x, using limit")
                     speed_factor = tempo_limit
                 
-                print(f"       -> Audio too long, speeding up by {speed_factor:.2f}x")
+                print(f"[VoiceBridge]        -> Audio too long, speeding up by {speed_factor:.2f}x")
                 
                 # Speed up audio
                 sped_up_path = os.path.join(temp_dir, f"audio_{entry.index:04d}_sped.wav")
@@ -744,11 +748,41 @@ class SRTToAudio:
                 
                 # Update the end time of the subtitle
                 entry.end_time_ms = entry.start_time_ms + entry.audio_duration_ms
+
+                if entry.end_time_ms > entries[i+1].start_time_ms and 0 < i < len(entries) - 1:
+                    # 如果还是超过了下一个字幕的开始时间，则借用上一个字幕和这个字幕之间的空隙。
+                    print(f"[VoiceBridge]        -> Audio still too long, borrowing time from previous subtitle")
+                    entry.start_time_ms = entries[i-1].end_time_ms + gap_ms
+                    entry.end_time_ms = entry.start_time_ms + entry.audio_duration_ms
                 
             else:
                 # The audio is within the available range but exceeds the original subtitle duration -> only adjust the subtitle end time
-                print(f"       -> Audio slightly longer than subtitle but within available time, adjusting end time")
+                print(f"[VoiceBridge]        -> Audio slightly longer than subtitle but within available time, adjusting end time")
                 entry.end_time_ms = entry.start_time_ms + audio_duration
+            
+            print(f"[VoiceBridge]        -> New subtitle: {entry.start_time_ms}ms -> {entry.end_time_ms}ms")
+
+        print("[VoiceBridge] Cascading shifting") # 级联偏移
+        for idx in range(0, len(entries) - 1):
+            subtitle_duration = entries[idx].end_time_ms - entries[idx].start_time_ms
+            ms_to_next_subtitle = entries[idx+1].start_time_ms - entries[idx].end_time_ms
+
+            print(f"[VoiceBridge]   [{idx+1}] Subtitle: {subtitle_duration}ms, Gap to next: {ms_to_next_subtitle}ms")
+            if ms_to_next_subtitle < gap_ms and idx < len(entries) - 1:
+                    # 如果还是超过了下一个字幕的开始时间，将后面的字幕依次往后移动，直到不超过下一个字幕的开始时间为止。
+                    print(f"[VoiceBridge]        -> Audio still too long, moving subsequent subtitles")
+                    borrow_time = entries[idx].end_time_ms - entries[idx+1].start_time_ms
+                    for j in range(idx+1, len(entries)):
+                        entries[j].start_time_ms += borrow_time + gap_ms
+                        entries[j].end_time_ms += borrow_time + gap_ms
+                        print(f"[VoiceBridge]          -> Moving subtitle {entries[j].index} backward by {borrow_time + gap_ms}ms")
+                        if j == len(entries) - 1:
+                            break
+                        elif entries[j].end_time_ms < entries[j+1].start_time_ms:
+                            break
+                        else:
+                            borrow_time = entries[j].end_time_ms - entries[j+1].start_time_ms
+
 
 # ---------------------------------------------------------------- Voice Bridge Linker -----------------------------------------------------------
 
@@ -782,13 +816,21 @@ def get_seg_timestamps(segments, forced_aligns):
     word_index = 0
 
     for i, segment in enumerate(segments):
-        start_char = segment[0]
-        end_char = segment[-1]
+        separators = r'[,\.\?!，。！？;；:：、\s\/\\\-—_()（）\[\]【】《》<>"''‘’“”=+*&#@%$^|~`]+'
+        word_list = [t for t in re.split(separators, segment) if t]
+
+        start_char = word_list[0][0]
+        end_char = word_list[-1][-1]
+        print('word_list:', word_list)
+
         # ------ check if it's english word ------ #
-        if is_english_char(start_char):
-            start_char = segment.split()[0]
+        if is_english_char(start_char) and forced_aligns[word_index].text == word_list[0]:
+            start_char = word_list[0]
         if is_english_char(end_char):
-            end_char = segment.split()[-1]
+             for test_j in range(word_index, len(forced_aligns)):
+                if word_list[-1] == forced_aligns[test_j].text: # 如果在后面的forced aligns被分词了
+                    end_char = word_list[-1]
+                    break
         if start_char == end_char == segment:
             srt_time_stamps.append((forced_aligns[word_index].start_time, forced_aligns[word_index].end_time))
             word_index += 1
@@ -796,14 +838,24 @@ def get_seg_timestamps(segments, forced_aligns):
 
         start_time = forced_aligns[word_index].start_time
         end_char_count = segment.count(end_char)
+        print("end_char: ", end_char)
+        print("end_char_count: ", end_char_count)
+
         if end_char_count == 1:
             while(forced_aligns[word_index].text != end_char):
                 word_index += 1
         else:
             count_char = 1
-            while (forced_aligns[word_index].text != end_char) and (count_char < end_char_count):
-                word_index += 1
-                count_char += 1
+            for word_jdx in range(word_index, len(forced_aligns)):
+                if forced_aligns[word_jdx].text == end_char:
+                    if count_char < end_char_count:
+                        count_char += 1
+                        word_index += 1
+                    else:
+                        break
+                else:
+                    word_index += 1
+
         end_time = forced_aligns[word_index].end_time
         srt_time_stamps.append((start_time, end_time))
         word_index += 1
@@ -903,6 +955,7 @@ class GenerateSRT:
 
 
         result_segments = split_string_regex(text, DELIMITERS)
+        print("result_segments: ", result_segments)
 
         srt_time_stamps = get_seg_timestamps(result_segments, forced_aligns)
 
@@ -911,7 +964,7 @@ class GenerateSRT:
         srt_string = generate_srt_string(adjust_segments, adjust_srt_time_stamps)
         if save_srt:
             save_srt_file(srt_string, save_path)
-            print("srt file save to path: ", save_path)
+            print("[VoiceBridge] srt file save to path: ", save_path)
 
         return (srt_string,)
     
@@ -935,7 +988,7 @@ class SaveSRTFromString:
         save_path = get_unique_filepath(output_dir, file_name, ".srt")
 
         save_srt_file(srt_string, save_path)
-        print("srt file save to path: ", save_path)
+        print("[VoiceBridge] srt file save to path: ", save_path)
 
         return (save_path,)
 

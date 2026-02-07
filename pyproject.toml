@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui_voicebridge"
-version = "0.1.2"
+version = "0.2.0"
 description = "Convert spoken audio to translated speech in any language via ASR + LLM + TTS pipeline"
 authors = [
   {name = "SevnFading", email = "sevnfading@gmail.com"}
