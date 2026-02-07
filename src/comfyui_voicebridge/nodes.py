@@ -821,7 +821,6 @@ def get_seg_timestamps(segments, forced_aligns):
 
         start_char = word_list[0][0]
         end_char = word_list[-1][-1]
-        print('word_list:', word_list)
 
         # ------ check if it's english word ------ #
         if is_english_char(start_char) and forced_aligns[word_index].text == word_list[0]:
@@ -838,8 +837,6 @@ def get_seg_timestamps(segments, forced_aligns):
 
         start_time = forced_aligns[word_index].start_time
         end_char_count = segment.count(end_char)
-        print("end_char: ", end_char)
-        print("end_char_count: ", end_char_count)
 
         if end_char_count == 1:
             while(forced_aligns[word_index].text != end_char):
@@ -955,7 +952,6 @@ class GenerateSRT:
 
 
         result_segments = split_string_regex(text, DELIMITERS)
-        print("result_segments: ", result_segments)
 
         srt_time_stamps = get_seg_timestamps(result_segments, forced_aligns)
 
