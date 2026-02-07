@@ -809,6 +809,30 @@ def get_seg_timestamps(segments, forced_aligns):
         word_index += 1
     return srt_time_stamps
 
+def adjust_srt_timestamps(segements, srt_time_stamps):
+    '''
+    微调字幕
+    '''
+    concate_segement = ["hi", "hello", "hey", "Hi", "Hello", "Hey", "大家好", "嗨"]
+    result_segments = [segements[0]]
+    result_srt_time_stamps = [srt_time_stamps[0]]
+    
+    # for i, (segment, (start_time, end_time)) in enumerate(zip(segements, srt_time_stamps)):
+    for i in range(1, len(segements)):
+        segment = segements[i]
+        (start_time, end_time) = srt_time_stamps[i]
+        if segment in concate_segement:
+            merged = result_segments[-1] + " " + segment
+            result_segments[-1] = merged
+
+            merged_time = (result_srt_time_stamps[-1][0], end_time)
+            result_srt_time_stamps[-1] = merged_time
+        else:
+            result_segments.append(segment)
+            result_srt_time_stamps.append((start_time, end_time))
+            
+    return result_segments, result_srt_time_stamps
+
 
 def format_timestamp(seconds):
     hours = int(seconds // 3600)
@@ -882,7 +906,9 @@ class GenerateSRT:
 
         srt_time_stamps = get_seg_timestamps(result_segments, forced_aligns)
 
-        srt_string = generate_srt_string(result_segments, srt_time_stamps)
+        adjust_segments, adjust_srt_time_stamps = adjust_srt_timestamps(result_segments, srt_time_stamps)
+
+        srt_string = generate_srt_string(adjust_segments, adjust_srt_time_stamps)
         if save_srt:
             save_srt_file(srt_string, save_path)
             print("srt file save to path: ", save_path)
