@@ -583,9 +583,9 @@ class SRTToAudio:
             },
             "optional": {
                 "language": (SUPPORTED_LANGUAGES, {"default": "auto"}),
-                "tempo_limit": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 2.0, "step": 0.1, "tooltip": "Maximum speed-up factor for audio that exceeds subtitle duration"}),
-                "mini_gap_ms" : ("INT", {"default": 100, "min": 0, "max": 1000, "tooltip": "Minimum gap between subtitles in milliseconds"}),
-                "batch_size": ("INT", {"default": 10, "min": 1, "max": 50, "tooltip": "Number of subtitles to process in each batch"}),
+                "tempo_limit": ("FLOAT", {"default": 1.5, "min": 1.0, "max": 5.0, "step": 0.1, "tooltip": "Maximum speed-up factor for audio that exceeds subtitle duration"}),
+                "mini_gap_ms" : ("INT", {"default": 100, "min": 0, "max": 10000, "tooltip": "Minimum gap between subtitles in milliseconds"}),
+                "batch_size": ("INT", {"default": 10, "min": 1, "max": 1000, "tooltip": "Number of subtitles to process in each batch"}),
             }
         }
     
