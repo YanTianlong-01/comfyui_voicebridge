@@ -7,7 +7,7 @@ This node integrates ASR (Automatic Speech Recognition), LLM (Large Language Mod
 
 ![](./assets/workflow.png)
 
-# Features
+## Features
 
 - **Speech Translation:** Convert speech from one language to any other language while retaining the original speaker's voice timbre
 
@@ -195,7 +195,7 @@ Saves an SRT formatted string to a file in the ComfyUI output directory. Automat
 
 ## Acknowledgments
 
-- [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS): Official open-source repository by Alibaba Qwen team.
+- [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) and [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS): Official open-source repository by Alibaba Qwen team.
 - [ComfyUI-Qwen3-ASR](https://github.com/DarioFT/ComfyUI-Qwen3-ASR): A nice and clean ComfyUI node by DarioFT.
 
 ## License
