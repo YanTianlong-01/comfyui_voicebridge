@@ -1,14 +1,12 @@
 # voice bridge nodes
 import re
 import os
+import gc
 import shutil
 import torch
 import numpy as np
 import folder_paths
 import comfy.model_management as mm
-from qwen_asr import Qwen3ASRModel
-from qwen_tts import Qwen3TTSModel
-from openai import OpenAI
 
 # for srt2audio
 import soundfile as sf
@@ -17,6 +15,45 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import subprocess
 from pydub import AudioSegment
+
+
+# ------------------------------------------------- Global Model Cache --------------------------------------------------
+
+_ASR_MODEL_CACHE = {}   # {cache_key: model}
+_TTS_MODEL_CACHE = {}   # {cache_key: model}
+
+
+def _soft_empty_cache():
+    """释放 GPU 显存和 Python 垃圾回收"""
+    mm.soft_empty_cache()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+
+def unload_asr_model(cache_key=None):
+    """卸载 ASR 缓存模型并释放显存"""
+    global _ASR_MODEL_CACHE
+    if cache_key and cache_key in _ASR_MODEL_CACHE:
+        print(f"[VoiceBridge] Unloading ASR model: {cache_key}")
+        del _ASR_MODEL_CACHE[cache_key]
+    elif _ASR_MODEL_CACHE:
+        print(f"[VoiceBridge] Unloading {len(_ASR_MODEL_CACHE)} cached ASR model(s)")
+        _ASR_MODEL_CACHE.clear()
+    _soft_empty_cache()
+
+
+def unload_tts_model(cache_key=None):
+    """卸载 TTS 缓存模型并释放显存"""
+    global _TTS_MODEL_CACHE
+    if cache_key and cache_key in _TTS_MODEL_CACHE:
+        print(f"[VoiceBridge] Unloading TTS model: {cache_key}")
+        del _TTS_MODEL_CACHE[cache_key]
+    elif _TTS_MODEL_CACHE:
+        print(f"[VoiceBridge] Unloading {len(_TTS_MODEL_CACHE)} cached TTS model(s)")
+        _TTS_MODEL_CACHE.clear()
+    _soft_empty_cache()
 
 # ----------------------------------------------------- SRT to Audio Process --------------------------------------------
 
@@ -114,8 +151,10 @@ def merge_audio_files(entries: List[SubtitleEntry], total_duration_ms: int) -> T
         position = entry.start_time_ms
         base_audio = base_audio.overlay(audio, position=position)
     
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-        tmp_path = tmp.name
+    # 使用 ComfyUI 临时目录
+    comfy_temp = folder_paths.get_temp_directory()
+    os.makedirs(comfy_temp, exist_ok=True)
+    tmp_path = os.path.join(comfy_temp, f"voicebridge_merge_{os.getpid()}.wav")
     
     base_audio.export(tmp_path, format="wav")
     
@@ -303,13 +342,17 @@ class Qwen3ASRLoader:
     CATEGORY = "VoiceBridge"
 
     def load_model(self, repo_id, source, precision, attention, max_new_tokens=256, forced_aligner="None", local_model_path_asr="", local_model_path_fa=""):
+        # 延迟导入以缩短 ComfyUI 初始加载时间
+        from qwen_asr import Qwen3ASRModel
+
+        global _ASR_MODEL_CACHE
         device = mm.get_torch_device()
         
         dtype = torch.float32
         if precision == "bf16":
             if device.type == "mps":
                 dtype = torch.float16
-                print("Note: Using fp16 on MPS (bf16 has limited support)")
+                print("[VoiceBridge] Note: Using fp16 on MPS (bf16 has limited support)")
             else:
                 dtype = torch.bfloat16
         elif precision == "fp16":
@@ -318,14 +361,25 @@ class Qwen3ASRLoader:
         if local_model_path_asr and local_model_path_asr.strip() != "":
             model_path = local_model_path_asr.strip()
             model_path = os.path.join(folder_paths.models_dir, model_path)
-            print(f"Loading from local path: {model_path}")
+            print(f"[VoiceBridge] Loading ASR from local path: {model_path}")
         else:
             local_path = get_local_model_path(repo_id, "Qwen3-ASR")
             if os.path.exists(local_path) and os.listdir(local_path):
                 model_path = local_path
-                print(f"Loading from ComfyUI models folder: {model_path}")
+                print(f"[VoiceBridge] Loading ASR from ComfyUI models folder: {model_path}")
             else:
                 model_path = download_model_to_comfyui(repo_id, source, "Qwen3-ASR")
+        
+        # 缓存键：模型路径 + 设备 + 精度 + 强制对齐器
+        cache_key = (model_path, str(device), str(dtype), forced_aligner)
+        if cache_key in _ASR_MODEL_CACHE:
+            print(f"[VoiceBridge] Using cached ASR model: {repo_id}")
+            return (_ASR_MODEL_CACHE[cache_key],)
+        
+        # 加载新模型前清理旧缓存
+        if _ASR_MODEL_CACHE:
+            print(f"[VoiceBridge] Clearing existing ASR cache for new model...")
+            unload_asr_model()
         
         model_kwargs = dict(
             dtype=dtype,
@@ -341,10 +395,10 @@ class Qwen3ASRLoader:
             if local_model_path_fa and local_model_path_fa.strip() != "":
                 aligner_local = local_model_path_fa.strip()
                 aligner_local = os.path.join(folder_paths.models_dir, aligner_local)
-                print(f"Loading from local path: {aligner_local}")
+                print(f"[VoiceBridge] Loading Force Aligner from local path: {aligner_local}")
             elif not (os.path.exists(aligner_local) and os.listdir(aligner_local)):
                 aligner_local = download_model_to_comfyui(forced_aligner, source, "Qwen3-ASR")
-            print(f"Loading Force Aligner from local path: {aligner_local}")
+            print(f"[VoiceBridge] Loading Force Aligner: {aligner_local}")
 
             model_kwargs["forced_aligner"] = aligner_local
             model_kwargs["forced_aligner_kwargs"] = dict(
@@ -354,8 +408,12 @@ class Qwen3ASRLoader:
             if attention != "auto":
                 model_kwargs["forced_aligner_kwargs"]["attn_implementation"] = attention
         
-        print(f"Loading Qwen3-ASR model from {model_path}...")
+        print(f"[VoiceBridge] Loading Qwen3-ASR model from {model_path}...")
         model = Qwen3ASRModel.from_pretrained(model_path, **model_kwargs)
+        
+        # 缓存模型
+        _ASR_MODEL_CACHE[cache_key] = model
+        print(f"[VoiceBridge] ASR model loaded and cached: {repo_id}")
         
         return (model,)
 
@@ -430,13 +488,17 @@ class Qwen3TTSLoader:
     CATEGORY = "VoiceBridge"
 
     def load_model(self, repo_id, source, precision, attention, local_model_path=""):
+        # 延迟导入以缩短 ComfyUI 初始加载时间
+        from qwen_tts import Qwen3TTSModel
+
+        global _TTS_MODEL_CACHE
         device = mm.get_torch_device()
         
         dtype = torch.float32
         if precision == "bf16":
             if device.type == "mps":
                 dtype = torch.float16
-                print("Note: Using fp16 on MPS (bf16 has limited support)")
+                print("[VoiceBridge] Note: Using fp16 on MPS (bf16 has limited support)")
             else:
                 dtype = torch.bfloat16
         elif precision == "fp16":
@@ -445,14 +507,25 @@ class Qwen3TTSLoader:
         if local_model_path and local_model_path.strip() != "":
             model_path = local_model_path.strip()
             model_path = os.path.join(folder_paths.models_dir, model_path)
-            print(f"Loading from local path: {model_path}")
+            print(f"[VoiceBridge] Loading TTS from local path: {model_path}")
         else:
             local_path = get_local_model_path(repo_id, "Qwen3-TTS")
             if os.path.exists(local_path) and os.listdir(local_path):
                 model_path = local_path
-                print(f"Loading from ComfyUI models folder: {model_path}")
+                print(f"[VoiceBridge] Loading TTS from ComfyUI models folder: {model_path}")
             else:
                 model_path = download_model_to_comfyui(repo_id, source, "Qwen3-TTS")
+        
+        # 缓存键：模型路径 + 设备 + 精度
+        cache_key = (model_path, str(device), str(dtype))
+        if cache_key in _TTS_MODEL_CACHE:
+            print(f"[VoiceBridge] Using cached TTS model: {repo_id}")
+            return (_TTS_MODEL_CACHE[cache_key],)
+        
+        # 加载新模型前清理旧缓存
+        if _TTS_MODEL_CACHE:
+            print(f"[VoiceBridge] Clearing existing TTS cache for new model...")
+            unload_tts_model()
         
         model_kwargs = dict(
             dtype=dtype,
@@ -461,8 +534,12 @@ class Qwen3TTSLoader:
         if attention != "auto":
             model_kwargs["attn_implementation"] = attention
         
-        print(f"Loading Qwen3-TTS model from {model_path}...")
+        print(f"[VoiceBridge] Loading Qwen3-TTS model from {model_path}...")
         model = Qwen3TTSModel.from_pretrained(model_path, **model_kwargs)
+        
+        # 缓存模型
+        _TTS_MODEL_CACHE[cache_key] = model
+        print(f"[VoiceBridge] TTS model loaded and cached: {repo_id}")
         
         return (model,)
     
@@ -541,7 +618,7 @@ class SRTToAudio:
             adjusted_srt: adjusted SRT string
         """
         if not srt_string or not srt_string.strip():
-            print("Error: Empty SRT string provided")
+            print("[VoiceBridge] Error: Empty SRT string provided")
             return ({"waveform": np.array([[0.0]]), "sample_rate": 16000}, "")
         
         print(f"Parsing SRT content ({len(srt_string)} chars)...")
@@ -549,12 +626,14 @@ class SRTToAudio:
         print(f"Found {len(entries)} subtitle entries")
         
         if len(entries) == 0:
-            print("Error: No valid subtitle entries found in SRT")
+            print("[VoiceBridge] Error: No valid subtitle entries found in SRT")
             return ({"waveform": np.array([[0.0]]), "sample_rate": 16000}, "")
         
-        temp_dir = tempfile.mkdtemp(prefix="srt_audio_")
+        # 使用 ComfyUI 临时目录
+        comfy_temp = folder_paths.get_temp_directory()
+        temp_dir = os.path.join(comfy_temp, f"srt_audio_{os.getpid()}_{id(self)}")
         os.makedirs(temp_dir, exist_ok=True)
-        print(f"Using temp directory: {temp_dir}")
+        print(f"[VoiceBridge] Using temp directory: {temp_dir}")
         
         lang = LANGUAGE_MAP.get(language, "auto")
         
@@ -857,6 +936,7 @@ class OpenAIAPI:
     CATEGORY = "VoiceBridge"
 
     def call_api(self, model, base_url, api_key, system_prompt, prompt, max_tokens=4096, temperature=0.7, top_p=0.95):
+        from openai import OpenAI
         client = OpenAI(
             api_key=api_key,
             base_url=base_url
