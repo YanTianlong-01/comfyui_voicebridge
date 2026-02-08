@@ -1,6 +1,5 @@
 # ComfyUI-VoiceBridge
-
-ComfyUI-VoiceBridge is a powerful ComfyUI custom node that translates spoken audio from any language to a target language while preserving the original speaker's voice characteristics, and generates bilingual SRT subtitle files. 
+VoiceBridge translates spoken audio from any language to a target language while preserving the original speaker's voice characteristics, and generates bilingual SRT subtitle files. 
 
 ---
 This node integrates ASR (Automatic Speech Recognition), LLM (Large Language Model), and TTS (Text-to-Speech) technologies to provide a complete speech translation pipeline.
@@ -93,6 +92,42 @@ Transcribes a single audio input to text using the loaded Qwen3-ASR model. Suppo
 | language | STRING | Detected or specified language code |
 | timestamps | STRING | Formatted string with word-level timestamps in "start_time-end_time: word" format (if enabled) |
 
+
+
+---
+
+### Generate SRT
+
+Generates an SRT subtitle file from transcribed text and forced alignment timestamps. This node combines text segmentation with timestamp data to create properly timed subtitle entries.
+
+| Input | Type | Description |
+|-------|------|-------------|
+| forced_aligns | LIST | List of ForcedAlignItem objects with word-level timestamps from ASR transcription |
+| text | STRING | Input text content to convert to SRT format |
+| language | STRING | Language of SRT text |
+| save_srt | BOOLEAN | Enable automatic saving of the generated SRT file to output directory (default: True) |
+| file_name | STRING | Base file name for the SRT output (default: "VoiceBridge\subtitle") |
+| **Output** | **Type** | **Description** |
+| srt_string | STRING | Generated SRT formatted string with proper timestamps and segmentation |
+
+---
+### VoiceBridge AI API
+
+Provides integration with OpenAI-compatible API endpoints for AI-powered text processing. Supports customizable system prompts and generation parameters for flexible content generation workflows.
+
+| Input | Type | Description |
+|-------|------|-------------|
+| model | STRING | API model identifier to use for text generation |
+| base_url | STRING | Base URL endpoint for the API (must be OpenAI-compatible) |
+| api_key | STRING | API authentication key for the service |
+| system_prompt | STRING | System instruction defining the AI assistant's behavior and constraints |
+| prompt | STRING | User prompt or query to send to the API |
+| max_tokens | INT | Maximum number of tokens in the generated response (default: 4096, range: 1-1000000) |
+| temperature | FLOAT | Sampling temperature controlling randomness (default: 0.7, range: 0-1) |
+| top_p | FLOAT | Nucleus sampling threshold for token selection (default: 0.95, range: 0-1) |
+| **Output** | **Type** | **Description** |
+| response | STRING | Generated text response from the API |
+
 ---
 
 ### VoiceBridge TTS Loader
@@ -122,39 +157,6 @@ Creates a voice clone prompt from reference audio for use with the Qwen3-TTS mod
 | ref_text | STRING | Transcript of the reference audio content (highly recommended for better quality) |
 | **Output** | **Type** | **Description** |
 | voice_clone_prompt | VOICE_CLONE_PROMPT | Voice clone prompt object containing extracted voice characteristics for TTS generation |
-
----
-
-### Generate SRT
-
-Generates an SRT subtitle file from transcribed text and forced alignment timestamps. This node combines text segmentation with timestamp data to create properly timed subtitle entries.
-
-| Input | Type | Description |
-|-------|------|-------------|
-| forced_aligns | LIST | List of ForcedAlignItem objects with word-level timestamps from ASR transcription |
-| text | STRING | Input text content to convert to SRT format |
-| save_srt | BOOLEAN | Enable automatic saving of the generated SRT file to output directory (default: True) |
-| file_name | STRING | Base file name for the SRT output (default: "VoiceBridge\subtitle") |
-| **Output** | **Type** | **Description** |
-| srt_string | STRING | Generated SRT formatted string with proper timestamps and segmentation |
-
----
-### VoiceBridge AI API
-
-Provides integration with OpenAI-compatible API endpoints for AI-powered text processing. Supports customizable system prompts and generation parameters for flexible content generation workflows.
-
-| Input | Type | Description |
-|-------|------|-------------|
-| model | STRING | API model identifier to use for text generation |
-| base_url | STRING | Base URL endpoint for the API (must be OpenAI-compatible) |
-| api_key | STRING | API authentication key for the service |
-| system_prompt | STRING | System instruction defining the AI assistant's behavior and constraints |
-| prompt | STRING | User prompt or query to send to the API |
-| max_tokens | INT | Maximum number of tokens in the generated response (default: 4096, range: 1-1000000) |
-| temperature | FLOAT | Sampling temperature controlling randomness (default: 0.7, range: 0-1) |
-| top_p | FLOAT | Nucleus sampling threshold for token selection (default: 0.95, range: 0-1) |
-| **Output** | **Type** | **Description** |
-| response | STRING | Generated text response from the API |
 
 ---
 
