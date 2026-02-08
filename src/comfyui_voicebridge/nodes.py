@@ -352,7 +352,7 @@ class Qwen3ASRLoader:
         if precision == "bf16":
             if device.type == "mps":
                 dtype = torch.float16
-                print("[VoiceBridge] Note: Using fp16 on MPS (bf16 has limited support)")
+                print(f"[VoiceBridge] Note: Using fp16 on MPS (bf16 has limited support)")
             else:
                 dtype = torch.bfloat16
         elif precision == "fp16":
@@ -498,7 +498,7 @@ class Qwen3TTSLoader:
         if precision == "bf16":
             if device.type == "mps":
                 dtype = torch.float16
-                print("[VoiceBridge] Note: Using fp16 on MPS (bf16 has limited support)")
+                print(f"[VoiceBridge] Note: Using fp16 on MPS (bf16 has limited support)")
             else:
                 dtype = torch.bfloat16
         elif precision == "fp16":
@@ -569,7 +569,7 @@ class VoiceClonePrompt:
             ref_text=ref_text,
             x_vector_only_mode=False,
         )
-        print("[VoiceBridge] Voice Clone Prompt created successfully!")
+        print(f"[VoiceBridge] Voice Clone Prompt created successfully!")
         return (result,)
     
 class SRTToAudio:
@@ -620,7 +620,7 @@ class SRTToAudio:
             adjusted_srt: adjusted SRT string
         """
         if not srt_string or not srt_string.strip():
-            print("[VoiceBridge] Error: Empty SRT string provided")
+            print(f"[VoiceBridge] Error: Empty SRT string provided")
             return ({"waveform": np.array([[0.0]]), "sample_rate": 16000}, "")
         
         print(f"[VoiceBridge] Parsing SRT content ({len(srt_string)} chars)...")
@@ -628,7 +628,7 @@ class SRTToAudio:
         print(f"[VoiceBridge] Found {len(entries)} subtitle entries")
         
         if len(entries) == 0:
-            print("[VoiceBridge] Error: No valid subtitle entries found in SRT")
+            print(f"[VoiceBridge] Error: No valid subtitle entries found in SRT")
             return ({"waveform": np.array([[0.0]]), "sample_rate": 16000}, "")
         
         # 使用 ComfyUI 临时目录
@@ -640,7 +640,7 @@ class SRTToAudio:
         lang = LANGUAGE_MAP.get(language, "auto")
         
         try:
-            print("[VoiceBridge] Starting audio generation...")
+            print(f"[VoiceBridge] Starting audio generation...")
             for i in range(0, len(entries), batch_size):
                 batch = entries[i:i+batch_size]
                 texts = [e.text for e in batch]
@@ -663,14 +663,14 @@ class SRTToAudio:
                 
                 torch.cuda.empty_cache()
             
-            print("[VoiceBridge] Processing duration mismatches...")
+            print(f"[VoiceBridge] Processing duration mismatches...")
             self._process_duration(entries, temp_dir, tempo_limit, mini_gap_ms)
             
             last_entry = entries[-1]
             total_duration = last_entry.start_time_ms + last_entry.audio_duration_ms + 1000
             
             # Synthesize the final audio
-            print("[VoiceBridge] Merging audio files...")
+            print(f"[VoiceBridge] Merging audio files...")
             wav_tensor, sample_rate = merge_audio_files(entries, total_duration)
 
             # Prepare audio output in ComfyUI format
@@ -762,7 +762,7 @@ class SRTToAudio:
             
             print(f"[VoiceBridge]        -> New subtitle: {entry.start_time_ms}ms -> {entry.end_time_ms}ms")
 
-        print("[VoiceBridge] Cascading shifting") # 级联偏移
+        print(f"[VoiceBridge] Cascading shifting") # 级联偏移
         for idx in range(0, len(entries) - 1):
             subtitle_duration = entries[idx].end_time_ms - entries[idx].start_time_ms
             ms_to_next_subtitle = entries[idx+1].start_time_ms - entries[idx].end_time_ms
@@ -786,10 +786,13 @@ class SRTToAudio:
 
 # ---------------------------------------------------------------- Voice Bridge Linker -----------------------------------------------------------
 
-DELIMITERS = ['，', '。', '！', '？', '；', '：', 
-              ',',  '.',  '!',  '?',  ';',  ':', 
-              '\n', '\r', '\t'
-            ]
+# DELIMITERS = ['，', '。', '！', '？', '；', '：', 
+#               ',',  '.',  '!',  '?',  ';',  ':', 
+#               '\n', '\r', '\t'
+#             ]
+
+CN_DELIMITERS = ['，', '。', '！', '？', '；', '：',]
+EN_DELIMITERS = [',', '.', '!', '?', ';', ':',]
 
 
 
@@ -816,11 +819,13 @@ def get_seg_timestamps(segments, forced_aligns):
     word_index = 0
 
     for i, segment in enumerate(segments):
+        tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+|[^\\s\u4e00-\u9fff a-zA-Z0-9]', segment)
         separators = r'[,\.\?!，。！？;；:：、\s\/\\\-—_()（）\[\]【】《》<>"''‘’“”=+*&#@%$^|~`]+'
-        word_list = [t for t in re.split(separators, segment) if t]
+        word_list = [t for t in tokens if t not in separators]
 
         start_char = word_list[0][0]
         end_char = word_list[-1][-1]
+        print(word_list)
 
         # ------ check if it's english word ------ #
         if is_english_char(start_char) and forced_aligns[word_index].text == word_list[0]:
@@ -857,6 +862,96 @@ def get_seg_timestamps(segments, forced_aligns):
         srt_time_stamps.append((start_time, end_time))
         word_index += 1
     return srt_time_stamps
+
+def get_seg_timestamps_2(segments, forced_aligns):
+    segments_one_word = []
+    segments_word_list = []
+
+    for i, segment in enumerate(segments):
+        separators = r'[,\.\?!，。！？;；:：、\s\/\\\-—_()（）\[\]【】《》<>"''‘’“”=+*&#@%$^|~`]+'
+        word_list = [t for t in re.split(separators, segment) if t]
+        final_word_list = []
+
+        for word in word_list:
+            tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+|[^\\s\u4e00-\u9fff a-zA-Z0-9]', word)
+            final_word_list.extend(tokens)
+
+        start_char = final_word_list[0][0]
+        end_char = final_word_list[-1][-1]
+
+        if is_english_char(start_char): # 因为已经使用了token分词，所有如果是英文字母的话，取出来一定是单词或者是单个英文字母，可以和fa中的text对应上。
+            start_char = final_word_list[0]
+        if is_english_char(end_char):
+            end_char = final_word_list[-1]
+
+
+        segments_word_list.append(final_word_list)
+        print(i, "final_word_list", final_word_list)
+
+        if end_char == start_char == segment:
+            segments_one_word.append(True)
+        else:
+            segments_one_word.append(False)
+
+    srt_time_stamps = []
+    # word_index = 0
+    forced_aligns_cp = forced_aligns
+    for i, segment in enumerate(segments):
+        if segments_one_word[i]:
+            srt_time_stamps.append((forced_aligns_cp[0].start_time, forced_aligns_cp[0].end_time))
+            forced_aligns_cp = forced_aligns_cp[1:]
+            # word_index = 0
+            continue
+
+        start_time = forced_aligns_cp[0].start_time
+        end_time = None
+
+
+        
+        # print("i=", i)
+        # print("segments_word_list[i]", segments_word_list[i])
+        end_char = segments_word_list[i][-1][-1] # 取最后一个word的最后一个字符
+        if is_english_char(end_char): # 检查是否为英文
+            end_char = segments_word_list[i][-1]
+
+        while not end_time:
+            end_char_count = segment.count(end_char)
+
+            # print("end_char", end_char)
+            # print("end_char_count", end_char_count)
+            count_char = 1
+            # print("forced_aligns_cp[0]", forced_aligns_cp[0].text)
+            # print("len(forced_aligns_cp)", len(forced_aligns_cp))
+            for word_jdx in range(0, len(forced_aligns_cp)): # 从前往后检索
+                if forced_aligns_cp[word_jdx].text == end_char:
+                    if count_char < end_char_count:
+                        # 找到了一样的，但不是最后那个
+                        count_char += 1
+                        # word_index += 1
+                    else:
+                        # 找到了最后一个字符的force align了
+                        end_time = forced_aligns_cp[word_jdx].end_time
+                        forced_aligns_cp = forced_aligns_cp[word_jdx+1:]
+                        # word_index = 0
+                        break
+
+            # 如果检索完整个forced aligns都没有找到，说明匹配失败
+            if not end_time:
+                if len(segments_word_list[i]) ==1:
+                    # 整一段字幕，没有一个字符能在force aligns中找到匹配的。则将第一个字符的end time作为介绍 (几乎不可能发生)
+                    raise Exception("No match found for segment: ", segment, "Please Report this issue in Github https://github.com/YanTianlong-01/comfyui_voicebridge")
+                    end_time = forced_aligns_cp[0].end_time
+                    pass
+                # 把最后两个字符合并起来，作为新的最后一个字符，重新检索
+              
+                segments_word_list[i] = segments_word_list[i][:-2] + [segments_word_list[i][-2]+segments_word_list[i][-1]]
+                end_char = segments_word_list[i][-1]
+
+        srt_time_stamps.append((start_time, end_time))
+    return srt_time_stamps
+
+
+
 
 def adjust_srt_timestamps(segements, srt_time_stamps):
     '''
@@ -931,8 +1026,10 @@ class GenerateSRT:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "text": ("STRING",),
                 "forced_aligns" : ("LIST",),
+                "text": ("STRING",),
+                "language": ("STRING",)
+                
             },
             "optional": {
                 "save_srt": ("BOOLEAN", {"default": True}),
@@ -945,22 +1042,24 @@ class GenerateSRT:
     FUNCTION = "generate_srt"
     CATEGORY = "VoiceBridge"
 
-    def generate_srt(self, text, forced_aligns, save_srt=True, file_name="VoiceBridge\subtitle"):
+    def generate_srt(self, forced_aligns, text, language, save_srt=True, file_name="VoiceBridge\subtitle"):
 
         output_dir = folder_paths.get_output_directory()
         save_path = get_unique_filepath(output_dir, file_name, ".srt")
 
+        if language == "Chinese":
+            result_segments = split_string_regex(text, CN_DELIMITERS)
+        else:
+            result_segments = split_string_regex(text, EN_DELIMITERS)
 
-        result_segments = split_string_regex(text, DELIMITERS)
-
-        srt_time_stamps = get_seg_timestamps(result_segments, forced_aligns)
+        srt_time_stamps = get_seg_timestamps_2(result_segments, forced_aligns)
 
         adjust_segments, adjust_srt_time_stamps = adjust_srt_timestamps(result_segments, srt_time_stamps)
 
         srt_string = generate_srt_string(adjust_segments, adjust_srt_time_stamps)
         if save_srt:
             save_srt_file(srt_string, save_path)
-            print("[VoiceBridge] srt file save to path: ", save_path)
+            print(f"[VoiceBridge] srt file save to path: ", save_path)
 
         return (srt_string,)
     
@@ -984,7 +1083,7 @@ class SaveSRTFromString:
         save_path = get_unique_filepath(output_dir, file_name, ".srt")
 
         save_srt_file(srt_string, save_path)
-        print("[VoiceBridge] srt file save to path: ", save_path)
+        print(f"[VoiceBridge] srt file save to path: ", save_path)
 
         return (save_path,)
 
