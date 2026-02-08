@@ -1,6 +1,6 @@
 # ComfyUI-VoiceBridge
 
-VoiceBridge is a ComfyUI custom node that translates spoken audio from any language to a target language while preserving the original speaker's voice characteristics, and generates bilingual SRT subtitle files. 
+ComfyUI-VoiceBridge is a powerful ComfyUI custom node that translates spoken audio from any language to a target language while preserving the original speaker's voice characteristics, and generates bilingual SRT subtitle files. 
 
 ---
 This node integrates ASR (Automatic Speech Recognition), LLM (Large Language Model), and TTS (Text-to-Speech) technologies to provide a complete speech translation pipeline.
