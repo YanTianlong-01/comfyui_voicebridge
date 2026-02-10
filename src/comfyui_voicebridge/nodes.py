@@ -1033,7 +1033,7 @@ class GenerateSRT:
             },
             "optional": {
                 "save_srt": ("BOOLEAN", {"default": True}),
-                "file_name" : ("STRING", {"default": "VoiceBridge\subtitle"}),
+                "filename_prefix" : ("STRING", {"default": "VoiceBridge\subtitle"}),
             }
         }
 
@@ -1042,10 +1042,10 @@ class GenerateSRT:
     FUNCTION = "generate_srt"
     CATEGORY = "VoiceBridge"
 
-    def generate_srt(self, forced_aligns, text, language, save_srt=True, file_name="VoiceBridge\subtitle"):
+    def generate_srt(self, forced_aligns, text, language, save_srt=True, filename_prefix="VoiceBridge\subtitle"):
 
         output_dir = folder_paths.get_output_directory()
-        save_path = get_unique_filepath(output_dir, file_name, ".srt")
+        save_path = get_unique_filepath(output_dir, filename_prefix, ".srt")
 
         if language == "Chinese":
             result_segments = split_string_regex(text, CN_DELIMITERS)
@@ -1069,7 +1069,7 @@ class SaveSRTFromString:
         return {
             "required": {
                 "srt_string": ("STRING",),
-                "file_name" : ("STRING", {"default": "VoiceBridge\subtitle"}),
+                "filename_prefix" : ("STRING", {"default": "VoiceBridge\subtitle"}),
             },
         }
 
@@ -1078,9 +1078,9 @@ class SaveSRTFromString:
     FUNCTION = "save_srt"
     CATEGORY = "VoiceBridge"
 
-    def save_srt(self, srt_string, file_name="VoiceBridge\subtitle"):
+    def save_srt(self, srt_string, filename_prefix="VoiceBridge\subtitle"):
         output_dir = folder_paths.get_output_directory()
-        save_path = get_unique_filepath(output_dir, file_name, ".srt")
+        save_path = get_unique_filepath(output_dir, filename_prefix, ".srt")
 
         save_srt_file(srt_string, save_path)
         print(f"[VoiceBridge] srt file save to path: ", save_path)
