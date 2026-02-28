@@ -1,8 +1,20 @@
 # ComfyUI-VoiceBridge
-VoiceBridge translates spoken audio from any language to a target language while preserving the original speaker's voice characteristics, and generates bilingual SRT subtitle files. 
 
----
+<div align="center">
+	<a href="https://github.com/YanTianlong-01/comfyui_voicebridge">
+		<img src="./assets/Icon.png" width="200" height="200">
+	</a>
+	<h1>VoiceBridge</h1>
+	<p>
+		<b>VoiceBridge translates spoken audio from any language to a target language while preserving the original speaker's voice characteristics, and generates bilingual SRT subtitle files.</b>
+	</p>
+	<br>
+</div>
+
+## Workflow
 This node integrates ASR (Automatic Speech Recognition), LLM (Large Language Model), and TTS (Text-to-Speech) technologies to provide a complete speech translation pipeline.
+
+[Online Workflow](https://www.runninghub.cn/post/2021530085228023809/aiDetail/?inviteCode=rh-v1455)
 
 ![](./assets/workflow.png)
 
