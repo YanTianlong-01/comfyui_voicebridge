@@ -886,7 +886,7 @@ def get_seg_timestamps_2(segments, forced_aligns):
 
 
         segments_word_list.append(final_word_list)
-        print(i, "final_word_list", final_word_list)
+        # print(" ", i, "final_word_list", final_word_list)
 
         if end_char == start_char == segment:
             segments_one_word.append(True)
@@ -915,7 +915,7 @@ def get_seg_timestamps_2(segments, forced_aligns):
             end_char = segments_word_list[i][-1]
 
         while not end_time:
-            end_char_count = segment.count(end_char)
+            end_char_count = segments_word_list.count(end_char)
 
             # print("end_char", end_char)
             # print("end_char_count", end_char_count)
