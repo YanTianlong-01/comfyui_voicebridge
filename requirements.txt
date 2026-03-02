@@ -6,4 +6,3 @@ accelerate
 modelscope
 soundfile
 openai
-tempfile
