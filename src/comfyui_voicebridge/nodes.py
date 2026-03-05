@@ -55,6 +55,13 @@ def unload_tts_model(cache_key=None):
         _TTS_MODEL_CACHE.clear()
     _soft_empty_cache()
 
+class ModelKey(str):
+    """
+    模型标识符类，继承自str，用于在节点间传递模型标识。
+    主要目的是让ComfyUI显示为自定义类型而不是普通字符串。
+    """
+    pass
+
 # ----------------------------------------------------- SRT to Audio Process --------------------------------------------
 
 @dataclass
@@ -336,8 +343,8 @@ class Qwen3ASRLoader:
             }
         }
 
-    RETURN_TYPES = ("QWEN3_ASR_MODEL",)
-    RETURN_NAMES = ("model",)
+    RETURN_TYPES = ("MODEL_KEY",)
+    RETURN_NAMES = ("model_key",)
     FUNCTION = "load_model"
     CATEGORY = "VoiceBridge"
 
@@ -371,10 +378,10 @@ class Qwen3ASRLoader:
                 model_path = download_model_to_comfyui(repo_id, source, "Qwen3-ASR")
         
         # 缓存键：模型路径 + 设备 + 精度 + 强制对齐器
-        cache_key = (model_path, str(device), str(dtype), forced_aligner)
+        cache_key = repr((model_path, str(device), str(dtype), forced_aligner))
         if cache_key in _ASR_MODEL_CACHE:
             print(f"[VoiceBridge] Using cached ASR model: {repo_id}")
-            return (_ASR_MODEL_CACHE[cache_key],)
+            return (ModelKey(cache_key),)
         
         # 加载新模型前清理旧缓存
         if _ASR_MODEL_CACHE:
@@ -415,7 +422,7 @@ class Qwen3ASRLoader:
         _ASR_MODEL_CACHE[cache_key] = model
         print(f"[VoiceBridge] ASR model loaded and cached: {repo_id}")
         
-        return (model,)
+        return (ModelKey(cache_key),)
 
 
 class Qwen3ASRTranscribe:
@@ -423,7 +430,7 @@ class Qwen3ASRTranscribe:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("QWEN3_ASR_MODEL",),
+                "model_key": ("MODEL_KEY",),
                 "audio": ("AUDIO",),
             },
             "optional": {
@@ -438,13 +445,18 @@ class Qwen3ASRTranscribe:
     FUNCTION = "transcribe"
     CATEGORY = "VoiceBridge"
 
-    def transcribe(self, model, audio, language="auto", context="", return_timestamps=False):
+    def transcribe(self, model_key, audio, language="auto", context="", return_timestamps=False):
         audio_data = load_audio_input(audio)
         if audio_data is None:
             return ("", "", "")
         
         lang = None if language == "auto" else language
         ctx = context if context.strip() else ""
+
+        global _ASR_MODEL_CACHE
+        model = _ASR_MODEL_CACHE.get(str(model_key))
+        if model is None:
+            raise RuntimeError(f"ASR model with key '{model_key}' not found in cache. Please run the loader first.")
         
         results = model.transcribe(
             audio=audio_data,
@@ -482,8 +494,8 @@ class Qwen3TTSLoader:
                 "local_model_path": ("STRING", {"default": "", "multiline": False}),
             }
         }
-    RETURN_TYPES = ("QWEN3_TTS_MODEL",)
-    RETURN_NAMES = ("model",)
+    RETURN_TYPES = ("MODEL_KEY",)
+    RETURN_NAMES = ("model_key",)
     FUNCTION = "load_model"
     CATEGORY = "VoiceBridge"
 
@@ -517,10 +529,10 @@ class Qwen3TTSLoader:
                 model_path = download_model_to_comfyui(repo_id, source, "Qwen3-TTS")
         
         # 缓存键：模型路径 + 设备 + 精度
-        cache_key = (model_path, str(device), str(dtype))
+        cache_key = repr((model_path, str(device), str(dtype)))
         if cache_key in _TTS_MODEL_CACHE:
             print(f"[VoiceBridge] Using cached TTS model: {repo_id}")
-            return (_TTS_MODEL_CACHE[cache_key],)
+            return (ModelKey(cache_key),)
         
         # 加载新模型前清理旧缓存
         if _TTS_MODEL_CACHE:
@@ -541,14 +553,14 @@ class Qwen3TTSLoader:
         _TTS_MODEL_CACHE[cache_key] = model
         print(f"[VoiceBridge] TTS model loaded and cached: {repo_id}")
         
-        return (model,)
+        return (ModelKey(cache_key),)
     
 class VoiceClonePrompt:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("QWEN3_TTS_MODEL",),
+                "model_key": ("MODEL_KEY",),
                 "ref_audio": ("AUDIO", {"tooltip": "Reference audio (ComfyUI Audio)"}),
                 "ref_text": ("STRING", {"multiline": True, "default": "", "placeholder": "Reference audio text (highly recommended for better quality)"}),
             }
@@ -559,10 +571,15 @@ class VoiceClonePrompt:
     FUNCTION = "create_prompt"
     CATEGORY = "VoiceBridge"
 
-    def create_prompt(self, model, ref_audio, ref_text):
+    def create_prompt(self, model_key, ref_audio, ref_text):
         audio_data = load_audio_input(ref_audio)
         if audio_data is None:
             return ("",)
+        
+        global _TTS_MODEL_CACHE
+        model = _TTS_MODEL_CACHE.get(str(model_key))
+        if model is None:
+            raise RuntimeError(f"TTS model with key '{model_key}' not found in cache. Please run the loader first.")
         
         result = model.create_voice_clone_prompt(
             ref_audio=audio_data,
@@ -577,7 +594,7 @@ class SRTToAudio:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("QWEN3_TTS_MODEL",),
+                "model_key": ("MODEL_KEY",),
                 "srt_string": ("STRING", {"multiline": True, "default": "", "placeholder": "SRT text"}),
                 "voice_clone_prompt": ("VOICE_CLONE_PROMPT",),
             },
@@ -596,7 +613,7 @@ class SRTToAudio:
 
     def convert_srt_to_audio(
         self, 
-        model, 
+        model_key, 
         srt_string, 
         voice_clone_prompt, 
         language="auto",
@@ -619,6 +636,11 @@ class SRTToAudio:
             audio: audio in ComfyUI format (waveform, sample_rate)
             adjusted_srt: adjusted SRT string
         """
+        global _TTS_MODEL_CACHE
+        model = _TTS_MODEL_CACHE.get(str(model_key))
+        if model is None:
+            raise RuntimeError(f"TTS model with key '{model_key}' not found in cache. Please run the loader first.")
+
         if not srt_string or not srt_string.strip():
             print(f"[VoiceBridge] Error: Empty SRT string provided")
             return ({"waveform": np.array([[0.0]]), "sample_rate": 16000}, "")
@@ -1131,7 +1153,37 @@ class OpenAIAPI:
         result = response.choices[0].message.content
         return (result, )
 
+class AnyType(str):
+  """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
+  def __eq__(self, __value: object) -> bool:
+    return True
+  def __ne__(self, __value: object) -> bool:
+    return False
 
+any = AnyType("*")
+
+class UnloadModel:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "anything" : (any, {}),
+                "Unload_ASR_Model" : ("BOOLEAN", {"default": True}),
+                "Unload_TTS_Model" : ("BOOLEAN", {"default": True}),
+            },
+        }
+    RETURN_TYPES = (any,)
+    RETURN_NAMES = ("any",)
+    FUNCTION = "unload_model"
+    CATEGORY = "VoiceBridge"
+
+    def unload_model(self, anything, Unload_ASR_Model=True, Unload_TTS_Model=True):
+        if Unload_ASR_Model:
+            unload_asr_model()
+        if Unload_TTS_Model:
+            unload_tts_model()
+        return (anything, )
+ 
 
 
 
@@ -1146,6 +1198,7 @@ NODE_CLASS_MAPPINGS = {
     "VoiceBridgeTTSLoader": Qwen3TTSLoader,
     "VoiceClonePrompt": VoiceClonePrompt,
     "SRTToAudio": SRTToAudio,
+    "VoiceBridgeUnloadModel": UnloadModel,
 
 }
 
@@ -1159,4 +1212,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VoiceBridgeTTSLoader": "VoiceBridge TTS Loader",
     "VoiceClonePrompt": "Voice Clone Prompt",
     "SRTToAudio": "SRT To Audio",
+    "VoiceBridgeUnloadModel": "VoiceBridge Unload Model",
 }
