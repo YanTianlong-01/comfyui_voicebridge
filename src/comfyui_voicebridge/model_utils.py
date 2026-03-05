@@ -12,6 +12,28 @@ import comfy.model_management as mm
 _ASR_MODEL_CACHE = {}   # {cache_key: model}
 _TTS_MODEL_CACHE = {}   # {cache_key: model}
 
+_unload_asr_counter = 0
+_unload_tts_counter = 0
+
+def increment_unload_counter(model_type: str):
+    global _unload_asr_counter
+    global _unload_tts_counter
+    if model_type == "asr":
+        _unload_asr_counter += 1
+        return _unload_asr_counter
+    elif model_type == "tts":
+        _unload_tts_counter += 1
+    else:
+        raise Exception("Invalid model type {model_type}, please use 'asr' or 'tts'")
+    return _unload_asr_counter, _unload_tts_counter
+
+def get_unload_counter(model_type: str):
+    if model_type == "asr":
+        return _unload_asr_counter
+    elif model_type == "tts":
+        return _unload_tts_counter
+    else:
+        raise Exception("Invalid model type {model_type}, please use 'asr' or 'tts'")
 
 def _soft_empty_cache():
     """释放 GPU 显存和 Python 垃圾回收"""

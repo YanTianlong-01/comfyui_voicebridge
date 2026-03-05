@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 
 from .model_utils import (
     _ASR_MODEL_CACHE, _TTS_MODEL_CACHE,
+    increment_unload_counter, get_unload_counter,
     unload_asr_model, unload_tts_model,
     ModelKey,
     QWEN3_ASR_MODELS, QWEN3_FORCED_ALIGNERS, SUPPORTED_LANGUAGES,
@@ -73,6 +74,13 @@ class Qwen3ASRLoader:
     RETURN_NAMES = ("model_key",)
     FUNCTION = "load_model"
     CATEGORY = "VoiceBridge"
+
+    def IS_CHANGED(cls, repo_id, source, precision, attention, max_new_tokens=256,
+                   forced_aligner="None", local_model_path_asr="", local_model_path_fa=""):
+        # 将输入参数和卸载计数器打包，任何变化都会触发重新执行
+        params = (repo_id, source, precision, attention, max_new_tokens,
+                  forced_aligner, local_model_path_asr, local_model_path_fa)
+        return (params, get_unload_counter('asr'))
 
     def load_model(self, repo_id, source, precision, attention, max_new_tokens=256, forced_aligner="None", local_model_path_asr="", local_model_path_fa=""):
         # 延迟导入以缩短 ComfyUI 初始加载时间
@@ -224,6 +232,11 @@ class Qwen3TTSLoader:
     RETURN_NAMES = ("model_key",)
     FUNCTION = "load_model"
     CATEGORY = "VoiceBridge"
+
+    def IS_CHANGED(cls, repo_id, source, precision, attention, local_model_path="",):
+        # 将输入参数和卸载计数器打包，任何变化都会触发重新执行
+        params = (repo_id, source, precision, attention, local_model_path)
+        return (params, get_unload_counter('tts'))
 
     def load_model(self, repo_id, source, precision, attention, local_model_path=""):
         # 延迟导入以缩短 ComfyUI 初始加载时间
@@ -671,8 +684,10 @@ class UnloadModel:
     def unload_model(self, anything, Unload_ASR_Model=True, Unload_TTS_Model=True):
         if Unload_ASR_Model:
             unload_asr_model()
+            increment_unload_counter("asr")
         if Unload_TTS_Model:
             unload_tts_model()
+            increment_unload_counter("tts")
         return (anything, )
  
 
