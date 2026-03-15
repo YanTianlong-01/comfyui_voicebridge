@@ -21,7 +21,7 @@ from .srt_utils import (
     SubtitleEntry,
     parse_srt_string, save_srt_string,
     get_audio_duration_ms, speed_up_audio, merge_audio_files,
-    split_string_regex, get_seg_timestamps_2, adjust_srt_timestamps,
+    split_string_regex, get_seg_timestamps, adjust_srt_timestamps,
     generate_srt_string, save_srt_file, get_unique_filepath,
     CN_DELIMITERS, EN_DELIMITERS, format_timestamp
 )
@@ -578,7 +578,7 @@ class GenerateSRT:
         else:
             result_segments = split_string_regex(text, EN_DELIMITERS)
 
-        srt_time_stamps = get_seg_timestamps_2(result_segments, forced_aligns)
+        srt_time_stamps = get_seg_timestamps(result_segments, forced_aligns)
 
         adjust_segments, adjust_srt_time_stamps = adjust_srt_timestamps(result_segments, srt_time_stamps)
 

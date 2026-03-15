@@ -159,56 +159,8 @@ def split_string_regex(text, delimiters):
 def is_english_char(char):
     return char.isascii() and char.isalpha()
 
+
 def get_seg_timestamps(segments, forced_aligns):
-    srt_time_stamps = []
-    word_index = 0
-
-    for i, segment in enumerate(segments):
-        tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+|[^\\s\u4e00-\u9fff a-zA-Z0-9]', segment)
-        separators = r'[,\.\?!，。！？;；:：、\s\/\\\-—_()（）\[\]【】《》<>"''‘’“”=+*&#@%$^|~`]+'
-        word_list = [t for t in tokens if t not in separators]
-
-        start_char = word_list[0][0]
-        end_char = word_list[-1][-1]
-        print(word_list)
-
-        # ------ check if it's english word ------ #
-        if is_english_char(start_char) and forced_aligns[word_index].text == word_list[0]:
-            start_char = word_list[0]
-        if is_english_char(end_char):
-             for test_j in range(word_index, len(forced_aligns)):
-                if word_list[-1] == forced_aligns[test_j].text: # 如果在后面的forced aligns被分词了
-                    end_char = word_list[-1]
-                    break
-        if start_char == end_char == segment:
-            srt_time_stamps.append((forced_aligns[word_index].start_time, forced_aligns[word_index].end_time))
-            word_index += 1
-            continue
-
-        start_time = forced_aligns[word_index].start_time
-        end_char_count = segment.count(end_char)
-
-        if end_char_count == 1:
-            while(forced_aligns[word_index].text != end_char):
-                word_index += 1
-        else:
-            count_char = 1
-            for word_jdx in range(word_index, len(forced_aligns)):
-                if forced_aligns[word_jdx].text == end_char:
-                    if count_char < end_char_count:
-                        count_char += 1
-                        word_index += 1
-                    else:
-                        break
-                else:
-                    word_index += 1
-
-        end_time = forced_aligns[word_index].end_time
-        srt_time_stamps.append((start_time, end_time))
-        word_index += 1
-    return srt_time_stamps
-
-def get_seg_timestamps_2(segments, forced_aligns):
     segments_one_word = []
     segments_word_list = []
 
@@ -216,6 +168,7 @@ def get_seg_timestamps_2(segments, forced_aligns):
         separators = r'[,\.\?!，。！？;；:：、\s\/\\\-—_()（）\[\]【】《》<>"''‘’“”=+*&#@%$^|~`]+'
         word_list = [t for t in re.split(separators, segment) if t]
         final_word_list = []
+        final_word_list_2 = []
 
         for word in word_list:
             tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+|[^\\s\u4e00-\u9fff a-zA-Z0-9]', word)
@@ -228,9 +181,15 @@ def get_seg_timestamps_2(segments, forced_aligns):
             start_char = final_word_list[0]
         if is_english_char(end_char):
             end_char = final_word_list[-1]
+        
+        for final_word in final_word_list:
+            if is_english_char(final_word[0]): # 如果是英文，不管，反正是单词或者单独的字母
+                final_word_list_2.append(final_word)
+            else:
+                final_word_list_2.extend(list(final_word))
 
 
-        segments_word_list.append(final_word_list)
+        segments_word_list.append(final_word_list_2)
         # print(" ", i, "final_word_list", final_word_list)
 
         if end_char == start_char == segment:
@@ -260,7 +219,7 @@ def get_seg_timestamps_2(segments, forced_aligns):
             end_char = segments_word_list[i][-1]
 
         while not end_time:
-            end_char_count = segments_word_list.count(end_char)
+            end_char_count = segments_word_list[i].count(end_char)
 
             # print("end_char", end_char)
             # print("end_char_count", end_char_count)
