@@ -243,7 +243,7 @@ def get_seg_timestamps(segments, forced_aligns):
             if not end_time:
                 if len(segments_word_list[i]) ==1:
                     # 整一段字幕，没有一个字符能在force aligns中找到匹配的。则将第一个字符的end time作为介绍 (几乎不可能发生)
-                    raise Exception("No match found for segment: ", segment, "Please Report this issue in Github https://github.com/YanTianlong-01/comfyui_voicebridge")
+                    raise Exception("No match found for segment: ", segment, "Please Report this issue in Github https://github.com/YanTianlong-01/comfyui_voicebridge \n Also, please attach the audio file related to this error.")
                     end_time = forced_aligns_cp[0].end_time
                     pass
                 # 把最后两个字符合并起来，作为新的最后一个字符，重新检索
