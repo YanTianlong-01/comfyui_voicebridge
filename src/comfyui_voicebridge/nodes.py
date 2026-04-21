@@ -7,6 +7,9 @@ import soundfile as sf
 import numpy as np
 import comfy.model_management as mm
 from typing import List, Optional, Tuple
+import tempfile
+import torchaudio
+
 
 from .model_utils import (
     _ASR_MODEL_CACHE, _TTS_MODEL_CACHE,
@@ -23,7 +26,8 @@ from .srt_utils import (
     get_audio_duration_ms, speed_up_audio, merge_audio_files,
     split_string_regex, get_seg_timestamps, adjust_srt_timestamps,
     generate_srt_string, save_srt_file, get_unique_filepath,
-    CN_DELIMITERS, EN_DELIMITERS, format_timestamp
+    CN_DELIMITERS, EN_DELIMITERS, format_timestamp,
+     entries_to_srt_items, srt_items_to_entries,
 )
 
 
@@ -544,6 +548,289 @@ class SRTToAudio:
                         else:
                             borrow_time = entries[j].end_time_ms - entries[j+1].start_time_ms
 
+# ----------------------------------------------------------------------- Decoupled SRT Pipeline -----------------------------------------------------------------
+
+class SRTSplitter:
+    """
+    Load an SRT (from string or file) and split it into a list of sentence texts
+    plus a metadata object (VB_SRT_ITEMS) that carries the original timestamps.
+
+    The `texts` output is emitted as a LIST, so any downstream TTS node
+    (Qwen-TTS / VoxCPM / LongCat / Fish S2 / ...) is automatically executed
+    once per sentence by ComfyUI's native list-iteration mechanism.
+    """
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "srt_string": ("STRING", {
+                    "multiline": True,
+                    "default": "",
+                    "placeholder": "Paste SRT text here, or leave empty and use srt_file_path",
+                }),
+            },
+            "optional": {
+                "srt_file_path": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Absolute path to an .srt file. Used only when srt_string is empty.",
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "VB_SRT_ITEMS", "INT")
+    RETURN_NAMES = ("texts", "srt_items", "count")
+    OUTPUT_IS_LIST = (True, False, False)
+    FUNCTION = "split"
+    CATEGORY = "VoiceBridge"
+
+    def split(self, srt_string, srt_file_path=""):
+        # 1) resolve srt_string from file when needed
+        srt_content = srt_string or ""
+        if (not srt_content.strip()) and srt_file_path and srt_file_path.strip():
+            path = srt_file_path.strip()
+            if not os.path.isabs(path):
+                # allow relative paths under ComfyUI/input
+                path = os.path.join(folder_paths.get_input_directory(), path)
+            print(f"[VoiceBridge] SRTSplitter: loading SRT from file: {path}")
+            with open(path, "r", encoding="utf-8") as f:
+                srt_content = f.read()
+
+        if not srt_content.strip():
+            raise ValueError("[VoiceBridge] SRTSplitter: Both srt_string and srt_file_path are empty.")
+
+        # 2) parse
+        entries = parse_srt_string(srt_content)
+        if len(entries) == 0:
+            raise ValueError("[VoiceBridge] SRTSplitter: No valid subtitle entries found in the provided SRT.")
+
+        texts = [e.text for e in entries]
+        srt_items = entries_to_srt_items(entries)
+        count = len(entries)
+
+        print(f"[VoiceBridge] SRTSplitter: parsed {count} subtitle entries, "
+              f"time range {entries[0].start_time_ms}ms -> {entries[-1].end_time_ms}ms")
+
+        # OUTPUT_IS_LIST = (True, False, False)
+        # -> return texts as list-of-strings, srt_items/count as single objects.
+        return (texts, srt_items, count)
+
+
+class AudioListMergerBySRT:
+    """
+    Collect a list of per-sentence AUDIOs (produced by any external TTS node iterated
+    over SRTSplitter.texts) and merge them back into a single AUDIO aligned with the
+    original SRT timestamps.
+
+    Sample rate is automatically read from each AUDIO dict — no manual setting needed.
+    All per-sentence audios are resampled to match the first sentence's sample rate.
+    """
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "srt_items": ("VB_SRT_ITEMS",),
+                "audios": ("AUDIO",),
+            },
+            "optional": {
+                "tempo_limit": ("FLOAT", {
+                    "default": 1.5, "min": 1.0, "max": 5.0, "step": 0.1,
+                    "tooltip": "Maximum speed-up factor for audio that exceeds subtitle duration",
+                }),
+                "mini_gap_ms": ("INT", {
+                    "default": 100, "min": 0, "max": 10000,
+                    "tooltip": "Minimum gap between subtitles in milliseconds",
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("AUDIO", "STRING")
+    RETURN_NAMES = ("audio", "adjusted_srt")
+    INPUT_IS_LIST = True
+    FUNCTION = "merge"
+    CATEGORY = "VoiceBridge"
+
+    @staticmethod
+    def _audio_to_numpy_mono(audio: dict, target_sr: int) -> np.ndarray:
+        """
+        Convert a ComfyUI AUDIO dict to a float32 mono numpy 1-D array.
+        Reads sample_rate directly from the AUDIO dict and resamples if needed.
+        """
+        waveform = audio.get("waveform")
+        src_sr = int(audio.get("sample_rate", target_sr))
+
+        if waveform is None:
+            raise ValueError("[VoiceBridge] AudioListMergerBySRT: AUDIO dict missing 'waveform'.")
+
+        if isinstance(waveform, np.ndarray):
+            waveform = torch.from_numpy(waveform)
+        if not isinstance(waveform, torch.Tensor):
+            raise TypeError(f"[VoiceBridge] Unexpected waveform type: {type(waveform)}")
+
+        wf = waveform.detach().cpu().float()
+        # Normalize shape to [C, T]
+        if wf.ndim == 3:
+            wf = wf[0]          # drop batch dim
+        elif wf.ndim == 1:
+            wf = wf.unsqueeze(0)
+        # Downmix to mono
+        if wf.shape[0] > 1:
+            wf = wf.mean(dim=0, keepdim=True)
+
+        # Resample to target_sr if this sentence has a different rate
+        if src_sr != target_sr:
+            print(f"[VoiceBridge]   Resampling audio from {src_sr}Hz to {target_sr}Hz")
+            wf = torchaudio.functional.resample(wf, orig_freq=src_sr, new_freq=target_sr)
+
+        return wf.squeeze(0).numpy()
+
+    def _process_duration(self, entries, temp_dir, tempo_limit, mini_gap_ms):
+        """Duration alignment — identical to SRTToAudio._process_duration."""
+        gap_ms = mini_gap_ms
+        for i, entry in enumerate(entries):
+            subtitle_duration = entry.end_time_ms - entry.start_time_ms
+            audio_duration = entry.audio_duration_ms
+
+            if i < len(entries) - 1:
+                available_time = entries[i + 1].start_time_ms - entry.start_time_ms
+            else:
+                available_time = subtitle_duration + 5000
+
+            print(f"[VoiceBridge]   [{entry.index}] Subtitle: {subtitle_duration}ms, "
+                  f"Audio: {audio_duration}ms, Available: {available_time}ms")
+
+            if audio_duration <= subtitle_duration:
+                new_end_time = entry.start_time_ms + audio_duration
+                print(f"[VoiceBridge]        -> Audio shorter, adjusting end time: "
+                      f"{entry.end_time_ms}ms -> {new_end_time}ms")
+                entry.end_time_ms = new_end_time
+
+            elif audio_duration > available_time:
+                speed_factor = audio_duration / max(1, (available_time - gap_ms))
+                if speed_factor > tempo_limit:
+                    print(f"[VoiceBridge]        -> Warning: Required speed-up "
+                          f"{speed_factor:.2f}x exceeds limit {tempo_limit}x, using limit")
+                    speed_factor = tempo_limit
+                print(f"[VoiceBridge]        -> Audio too long, speeding up by {speed_factor:.2f}x")
+
+                sped_up_path = os.path.join(temp_dir, f"audio_{entry.index:04d}_sped.wav")
+                speed_up_audio(entry.audio_path, sped_up_path, speed_factor)
+                entry.audio_path = sped_up_path
+                entry.audio_duration_ms = get_audio_duration_ms(sped_up_path)
+                entry.end_time_ms = entry.start_time_ms + entry.audio_duration_ms
+
+                if (entry.end_time_ms > entries[i + 1].start_time_ms
+                        and 0 < i < len(entries) - 1):
+                    print(f"[VoiceBridge]        -> Audio still too long, borrowing time from previous subtitle")
+                    entry.start_time_ms = entries[i - 1].end_time_ms + gap_ms
+                    entry.end_time_ms = entry.start_time_ms + entry.audio_duration_ms
+            else:
+                print(f"[VoiceBridge]        -> Audio slightly longer than subtitle but within available time")
+                entry.end_time_ms = entry.start_time_ms + audio_duration
+
+            print(f"[VoiceBridge]        -> New subtitle: {entry.start_time_ms}ms -> {entry.end_time_ms}ms")
+
+        print(f"[VoiceBridge] Cascading shifting")
+        for idx in range(0, len(entries) - 1):
+            subtitle_duration = entries[idx].end_time_ms - entries[idx].start_time_ms
+            ms_to_next = entries[idx + 1].start_time_ms - entries[idx].end_time_ms
+            print(f"[VoiceBridge]   [{idx + 1}] Subtitle: {subtitle_duration}ms, Gap to next: {ms_to_next}ms")
+            if ms_to_next < gap_ms:
+                print(f"[VoiceBridge]        -> Audio still too long, moving subsequent subtitles")
+                borrow_time = entries[idx].end_time_ms - entries[idx + 1].start_time_ms
+                for j in range(idx + 1, len(entries)):
+                    entries[j].start_time_ms += borrow_time + gap_ms
+                    entries[j].end_time_ms += borrow_time + gap_ms
+                    print(f"[VoiceBridge]          -> Moving subtitle {entries[j].index} "
+                          f"backward by {borrow_time + gap_ms}ms")
+                    if j == len(entries) - 1:
+                        break
+                    elif entries[j].end_time_ms < entries[j + 1].start_time_ms:
+                        break
+                    else:
+                        borrow_time = entries[j].end_time_ms - entries[j + 1].start_time_ms
+
+    def merge(self, srt_items, audios,
+              tempo_limit=[1.5], mini_gap_ms=[100]):
+        # Unwrap scalars (INPUT_IS_LIST=True wraps everything in lists)
+        if isinstance(srt_items, list):
+            if len(srt_items) != 1:
+                raise ValueError(
+                    f"[VoiceBridge] AudioListMergerBySRT: expected exactly 1 srt_items object, "
+                    f"got {len(srt_items)}."
+                )
+            srt_items_obj = srt_items[0]
+        else:
+            srt_items_obj = srt_items
+
+        tempo_limit = float(tempo_limit[0]) if isinstance(tempo_limit, list) else float(tempo_limit)
+        mini_gap_ms  = int(mini_gap_ms[0])  if isinstance(mini_gap_ms,  list) else int(mini_gap_ms)
+
+        entries = srt_items_to_entries(srt_items_obj)
+
+        if not audios:
+            raise ValueError("[VoiceBridge] AudioListMergerBySRT: no audio received.")
+        if len(audios) != len(entries):
+            raise ValueError(
+                f"[VoiceBridge] AudioListMergerBySRT: received {len(audios)} audio segment(s) "
+                f"but {len(entries)} subtitle entries. They must match one-to-one.\n"
+                f"  audio count   = {len(audios)}\n"
+                f"  entries count = {len(entries)}"
+            )
+
+        # ── Determine target sample rate from the first audio ──────────────────
+        # All four TTS nodes (Qwen-TTS / VoxCPM / LongCat / Fish S2) include
+        # sample_rate in their AUDIO dict output, so we read it directly.
+        target_sr = int(audios[0].get("sample_rate", 24000))
+        print(f"[VoiceBridge] AudioListMergerBySRT: merging {len(entries)} sentences, "
+              f"target_sr={target_sr}Hz (from first audio), "
+              f"tempo_limit={tempo_limit}, gap={mini_gap_ms}ms")
+
+        comfy_temp = folder_paths.get_temp_directory()
+        temp_dir = os.path.join(comfy_temp, f"voicebridge_merge_{os.getpid()}_{id(self)}")
+        os.makedirs(temp_dir, exist_ok=True)
+        print(f"[VoiceBridge] AudioListMergerBySRT: temp dir {temp_dir}")
+
+        try:
+            # 1) Dump every sentence to wav @ target_sr
+            for entry, audio in zip(entries, audios):
+                wav_np = self._audio_to_numpy_mono(audio, target_sr)
+                out_path = os.path.join(temp_dir, f"audio_{entry.index:04d}.wav")
+                sf.write(out_path, wav_np, target_sr)
+                entry.audio_path = out_path
+                entry.audio_duration_ms = get_audio_duration_ms(out_path)
+
+            # 2) Duration alignment (speed-up / end-time adjust / cascade)
+            print(f"[VoiceBridge] AudioListMergerBySRT: processing duration mismatches...")
+            self._process_duration(entries, temp_dir, tempo_limit, mini_gap_ms)
+
+            # 3) Overlay all sentences onto one timeline
+            last_entry = entries[-1]
+            total_duration = last_entry.start_time_ms + last_entry.audio_duration_ms + 1000
+            print(f"[VoiceBridge] AudioListMergerBySRT: merging audio files, total {total_duration}ms...")
+            wav_tensor, sample_rate = merge_audio_files(entries, total_duration)
+
+            audio_output = {"waveform": wav_tensor, "sample_rate": sample_rate}
+            adjusted_srt = save_srt_string(entries)
+
+            print(f"[VoiceBridge] AudioListMergerBySRT: done. "
+                  f"{wav_tensor.shape[-1]} samples @ {sample_rate}Hz")
+            return (audio_output, adjusted_srt)
+
+        except Exception as e:
+            print(f"[VoiceBridge] AudioListMergerBySRT error: {e}")
+            import traceback
+            traceback.print_exc()
+            silent = {"waveform": torch.zeros(1, 1, 16000), "sample_rate": 16000}
+            return (silent, "")
+        finally:
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception:
+                pass
+
 
 
 
@@ -559,7 +846,7 @@ class GenerateSRT:
             },
             "optional": {
                 "save_srt": ("BOOLEAN", {"default": True}),
-                "filename_prefix" : ("STRING", {"default": "VoiceBridge\subtitle"}),
+                "filename_prefix" : ("STRING", {"default": "VoiceBridge_subtitle"}),
             }
         }
 
@@ -568,7 +855,7 @@ class GenerateSRT:
     FUNCTION = "generate_srt"
     CATEGORY = "VoiceBridge"
 
-    def generate_srt(self, forced_aligns, text, language, save_srt=True, filename_prefix="VoiceBridge\subtitle"):
+    def generate_srt(self, forced_aligns, text, language, save_srt=True, filename_prefix="VoiceBridge_subtitle"):
 
         output_dir = folder_paths.get_output_directory()
         save_path = get_unique_filepath(output_dir, filename_prefix, ".srt")
@@ -595,7 +882,7 @@ class SaveSRTFromString:
         return {
             "required": {
                 "srt_string": ("STRING",),
-                "filename_prefix" : ("STRING", {"default": "VoiceBridge\subtitle"}),
+                "filename_prefix" : ("STRING", {"default": "VoiceBridge_subtitle"}),
             },
         }
 
@@ -604,7 +891,7 @@ class SaveSRTFromString:
     FUNCTION = "save_srt"
     CATEGORY = "VoiceBridge"
 
-    def save_srt(self, srt_string, filename_prefix="VoiceBridge\subtitle"):
+    def save_srt(self, srt_string, filename_prefix="VoiceBridge_subtitle"):
         output_dir = folder_paths.get_output_directory()
         save_path = get_unique_filepath(output_dir, filename_prefix, ".srt")
 
@@ -705,6 +992,8 @@ NODE_CLASS_MAPPINGS = {
     "VoiceClonePrompt": VoiceClonePrompt,
     "SRTToAudio": SRTToAudio,
     "VoiceBridgeUnloadModel": UnloadModel,
+    "VoiceBridgeSRTSplitter": SRTSplitter,
+    "VoiceBridgeAudioListMergerBySRT": AudioListMergerBySRT,
 
 }
 
@@ -719,4 +1008,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VoiceClonePrompt": "Voice Clone Prompt",
     "SRTToAudio": "SRT To Audio",
     "VoiceBridgeUnloadModel": "VoiceBridge Unload Model",
+    "VoiceBridgeSRTSplitter": "VoiceBridge SRT Splitter",
+    "VoiceBridgeAudioListMergerBySRT": "VoiceBridge Audio List Merger by SRT",
 }

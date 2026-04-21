@@ -323,3 +323,31 @@ def get_unique_filepath(base_dir, base_name, extension):
         if not os.path.exists(filepath):
             return filepath
         index += 1
+
+
+# --------------------------------------------------- New helpers for decoupled pipeline ---------------------------------------------------
+
+def entries_to_srt_items(entries: List[SubtitleEntry]) -> List[dict]:
+    """Serialize SubtitleEntry list to plain dict list for cross-node transport."""
+    return [
+        {
+            "index": e.index,
+            "start_time_ms": e.start_time_ms,
+            "end_time_ms": e.end_time_ms,
+            "text": e.text,
+        }
+        for e in entries
+    ]
+
+
+def srt_items_to_entries(items: List[dict]) -> List[SubtitleEntry]:
+    """Inverse of entries_to_srt_items."""
+    return [
+        SubtitleEntry(
+            index=int(it["index"]),
+            start_time_ms=int(it["start_time_ms"]),
+            end_time_ms=int(it["end_time_ms"]),
+            text=str(it["text"]),
+        )
+        for it in items
+    ]
