@@ -550,10 +550,98 @@ class SRTToAudio:
 
 # ----------------------------------------------------------------------- Decoupled SRT Pipeline -----------------------------------------------------------------
 
+class LoadSRT:
+    """
+    Load an .srt subtitle file from ComfyUI/input directory.
+    The dropdown widget is paired with a frontend upload button
+    (registered by web/js/uploadSRT.js) that mirrors the UX of
+    ComfyUI's Load Audio / Load Image nodes.
+
+    Output is the raw SRT string, ready to be wired into SRTSplitter.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        input_dir = folder_paths.get_input_directory()
+        try:
+            files = [
+                f for f in os.listdir(input_dir)
+                if os.path.isfile(os.path.join(input_dir, f))
+                and f.lower().split(".")[-1] in ("srt", "txt")
+            ]
+        except FileNotFoundError:
+            files = []
+        return {
+            "required": {
+                "srt": (sorted(files),),
+            },
+        }
+
+    CATEGORY = "VoiceBridge"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("srt_string",)
+    FUNCTION = "load_srt"
+
+    def load_srt(self, srt):
+        if not srt or not str(srt).strip():
+            raise ValueError(
+                "[VoiceBridge] LoadSRT: no file selected. "
+                "Click the upload button on the node, or put an .srt file "
+                "into ComfyUI/input/ and pick it from the dropdown."
+            )
+
+        srt_path = folder_paths.get_annotated_filepath(srt)
+        if not os.path.isfile(srt_path):
+            raise FileNotFoundError(f"[VoiceBridge] LoadSRT: file not found: {srt_path}")
+
+        # Robust decoding: UTF-8 with BOM fallback, then common CN encodings.
+        content = None
+        for enc in ("utf-8", "utf-8-sig", "gbk", "gb18030", "latin-1"):
+            try:
+                with open(srt_path, "r", encoding=enc) as f:
+                    content = f.read()
+                if enc != "utf-8":
+                    print(f"[VoiceBridge] LoadSRT: decoded '{os.path.basename(srt_path)}' with fallback encoding '{enc}'.")
+                break
+            except UnicodeDecodeError:
+                continue
+        if content is None:
+            raise RuntimeError(f"[VoiceBridge] LoadSRT: could not decode {srt_path} with any known encoding.")
+
+        # Strip UTF-8 BOM defensively
+        if content.startswith("\ufeff"):
+            content = content.lstrip("\ufeff")
+
+        print(f"[VoiceBridge] LoadSRT: loaded {len(content)} chars from {os.path.basename(srt_path)}")
+        return (content,)
+
+    @classmethod
+    def IS_CHANGED(cls, srt):
+        import hashlib
+        if not srt:
+            return "empty"
+        srt_path = folder_paths.get_annotated_filepath(srt)
+        if not os.path.isfile(srt_path):
+            return f"missing:{srt}"
+        h = hashlib.sha256()
+        with open(srt_path, "rb") as f:
+            h.update(f.read())
+        return h.hexdigest()
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, srt):
+        if not srt or not str(srt).strip():
+            return "LoadSRT: no .srt file selected."
+        if not folder_paths.exists_annotated_filepath(srt):
+            return f"LoadSRT: file does not exist in input directory: {srt}"
+        return True
+
+
+
 class SRTSplitter:
     """
-    Load an SRT (from string or file) and split it into a list of sentence texts
-    plus a metadata object (VB_SRT_ITEMS) that carries the original timestamps.
+    Parse an SRT string and split it into a list of sentence texts plus a
+    metadata object (VB_SRT_ITEMS) that carries the original timestamps.
 
     The `texts` output is emitted as a LIST, so any downstream TTS node
     (Qwen-TTS / VoxCPM / LongCat / Fish S2 / ...) is automatically executed
@@ -567,14 +655,8 @@ class SRTSplitter:
                 "srt_string": ("STRING", {
                     "multiline": True,
                     "default": "",
-                    "placeholder": "Paste SRT text here, or leave empty and use srt_file_path",
-                }),
-            },
-            "optional": {
-                "srt_file_path": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                    "tooltip": "Absolute path to an .srt file. Used only when srt_string is empty.",
+                    "forceInput": False,
+                    "placeholder": "Paste SRT text here, or connect a Load SRT node",
                 }),
             }
         }
@@ -585,23 +667,11 @@ class SRTSplitter:
     FUNCTION = "split"
     CATEGORY = "VoiceBridge"
 
-    def split(self, srt_string, srt_file_path=""):
-        # 1) resolve srt_string from file when needed
-        srt_content = srt_string or ""
-        if (not srt_content.strip()) and srt_file_path and srt_file_path.strip():
-            path = srt_file_path.strip()
-            if not os.path.isabs(path):
-                # allow relative paths under ComfyUI/input
-                path = os.path.join(folder_paths.get_input_directory(), path)
-            print(f"[VoiceBridge] SRTSplitter: loading SRT from file: {path}")
-            with open(path, "r", encoding="utf-8") as f:
-                srt_content = f.read()
+    def split(self, srt_string):
+        if not srt_string or not srt_string.strip():
+            raise ValueError("[VoiceBridge] SRTSplitter: srt_string is empty.")
 
-        if not srt_content.strip():
-            raise ValueError("[VoiceBridge] SRTSplitter: Both srt_string and srt_file_path are empty.")
-
-        # 2) parse
-        entries = parse_srt_string(srt_content)
+        entries = parse_srt_string(srt_string)
         if len(entries) == 0:
             raise ValueError("[VoiceBridge] SRTSplitter: No valid subtitle entries found in the provided SRT.")
 
@@ -613,8 +683,8 @@ class SRTSplitter:
               f"time range {entries[0].start_time_ms}ms -> {entries[-1].end_time_ms}ms")
 
         # OUTPUT_IS_LIST = (True, False, False)
-        # -> return texts as list-of-strings, srt_items/count as single objects.
         return (texts, srt_items, count)
+
 
 
 class AudioListMergerBySRT:
@@ -992,6 +1062,7 @@ NODE_CLASS_MAPPINGS = {
     "VoiceClonePrompt": VoiceClonePrompt,
     "SRTToAudio": SRTToAudio,
     "VoiceBridgeUnloadModel": UnloadModel,
+    "VoiceBridgeLoadSRT": LoadSRT,
     "VoiceBridgeSRTSplitter": SRTSplitter,
     "VoiceBridgeAudioListMergerBySRT": AudioListMergerBySRT,
 
@@ -1008,6 +1079,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VoiceClonePrompt": "Voice Clone Prompt",
     "SRTToAudio": "SRT To Audio",
     "VoiceBridgeUnloadModel": "VoiceBridge Unload Model",
+    "VoiceBridgeLoadSRT": "VoiceBridge Load SRT",
     "VoiceBridgeSRTSplitter": "VoiceBridge SRT Splitter",
     "VoiceBridgeAudioListMergerBySRT": "VoiceBridge Audio List Merger by SRT",
 }
