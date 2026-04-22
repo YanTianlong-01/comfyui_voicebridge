@@ -11,26 +11,27 @@
 	<br>
 </div>
 
-## Workflow
+## 🔄 Workflow
 This node integrates ASR (Automatic Speech Recognition), LLM (Large Language Model), and TTS (Text-to-Speech) technologies to provide a complete speech translation pipeline.
 
 [Online Workflow](https://www.runninghub.cn/post/2021530085228023809/aiDetail/?inviteCode=rh-v1455)
 
 ![](./assets/workflow.png)
 
-## Features
+## ✨ Features
 
-- **Speech Translation:** Convert speech from one language to any other language while retaining the original speaker's voice timbre
+- 🌍 **Speech Translation:** Convert speech from one language to any other language while retaining the original speaker's voice timbre.
+
+- 🗣️ **Multi-Language Support:** Speech recognition and translation in dozens of languages covering all major global languages.
+
+- ⏱️ **Automatic Voice Alignment:** The generated translated voice is automatically aligned with the original voice to stay in sync with the video content.
+
+- 📝 **Accurate Subtitle Generation:** Through force-align technology, VoiceBridge produces accurate subtitles synchronized with the voice at the millisecond level.
+
+- 🔌 **Universal TTS Support:** The new decoupled pipeline — `Load SRT` → `SRT Splitter` → `<Any TTS node>` → `Audio List Merger by SRT` — lets you drive **any ComfyUI TTS custom node** (Qwen3-TTS, VoxCPM, Fish Audio S2, LongCat-AudioDiT, CosyVoice, …). As long as the TTS node takes a `STRING` and returns an `AUDIO`.
 
 
-- **Multi-Language Support:** Support for speech recognition and translation in dozens of languages covering major global languages
-
-- **Automatic voice alignment:** The generated translated voice is automatically aligned with the original voice to ensure the synchronization between the translated voice and the video content.
-
-- **Accurate subtitle generation:** Through force align technology, accurate subtitles can be generated, ensuring that the subtitles and voice are synchronized at the millisecond level.
-
-
-## Installation
+## 📦 Installation
 
 ### Via ComfyUI Manager (Recommended)
 Search for "VoiceBridge" in ComfyUI Manager
@@ -65,8 +66,51 @@ For ForcedAligner models, you can set `local_model_path_fa`=`qwen-asr/Qwen3-Forc
 
 
 
-## Nodes
+## 🧩 Nodes
 
+### 📥 Load SRT
+
+Loads an `.srt` (or `.txt`) subtitle file from `ComfyUI/input/`. The node ships with a dropdown listing existing files, plus a frontend-injected **"choose srt file to upload"** button that mirrors the UX of ComfyUI's built-in *Load Audio* node. Uploaded files are saved to the input directory and appear in the dropdown immediately.
+
+Output is the raw SRT string, ready to be wired into `SRT Splitter.srt_string`.
+
+| Input | Type | Description |
+|-------|------|-------------|
+| srt | dropdown | Pick an `.srt` / `.txt` file from `ComfyUI/input/`. Uploaded files are auto-added to this list. |
+| **Output** | **Type** | **Description** |
+| srt_string | STRING | Raw SRT content decoded from the file (UTF-8 with BOM / GBK fallback handled internally). |
+
+---
+
+### ✂️ SRT Splitter
+
+Parses an SRT string and splits it into a list of per-sentence texts plus a metadata object that carries the original timestamps. Because `texts` is emitted as a native ComfyUI `LIST`, any downstream TTS node connected to it will be executed once per sentence automatically — no custom loop nodes required.
+
+| Input | Type | Description |
+|-------|------|-------------|
+| srt_string | STRING | SRT text from `Load SRT`, `Generate SRT`, or a manual paste. |
+| **Output** | **Type** | **Description** |
+| texts | LIST[STRING] | List of per-sentence texts, one entry per SRT subtitle. ComfyUI's list-iteration will feed them to the downstream TTS one by one. |
+| srt_items | VB_SRT_ITEMS | Metadata object holding `(index, start_ms, end_ms, text)` for every subtitle entry. Feed this into `Audio List Merger by SRT`. |
+| count | INT | Number of subtitle entries parsed. |
+
+---
+
+### 🔀 Audio List Merger by SRT
+
+Collects the per-sentence `AUDIO` outputs produced by any external TTS node (iterated over `SRT Splitter.texts`) and merges them back into a single `AUDIO` aligned with the original SRT timestamps. Uses the same duration-matching / tempo-limit / cascading-shift algorithm as the legacy `SRT To Audio` node. The sample rate is read from the first incoming `AUDIO` dict and every other sentence is resampled to match.
+
+| Input | Type | Description |
+|-------|------|-------------|
+| srt_items | VB_SRT_ITEMS | Metadata from `SRT Splitter` carrying the original timestamps. |
+| audios | LIST[AUDIO] | Per-sentence AUDIO outputs from any TTS node — auto-collected by ComfyUI's list-iteration. |
+| tempo_limit | FLOAT | (optional) Maximum speed-up factor for audio that overflows a subtitle slot. Default 1.5, range 1.0–5.0. |
+| mini_gap_ms | INT | (optional) Minimum gap between consecutive subtitles in milliseconds. Default 100, range 0–10,000. |
+| **Output** | **Type** | **Description** |
+| audio | AUDIO | Final merged audio in ComfyUI format (`waveform`, `sample_rate`). |
+| adjusted_srt | STRING | Adjusted SRT string whose timing reflects the real audio durations after tempo / shift corrections. |
+
+---
 
 ### VoiceBridge ASR Loader
 
@@ -205,14 +249,27 @@ Saves an SRT formatted string to a file in the ComfyUI output directory. Automat
 | save_path | STRING | Full path where the SRT file was saved |
 
 
+---
+
+### 🧹 VoiceBridge Unload Model
+
+Unloads cached ASR and/or TTS models from GPU memory to free VRAM. Useful when chaining different models sequentially or running on limited-memory GPUs. Acts as a pass-through node — wire the `anything` input after the node whose output you want to keep, and the same value will be forwarded on `any` once the unload runs.
+
+| Input | Type | Description |
+|-------|------|-------------|
+| anything | * | Any value, passed straight through the node so you can insert it anywhere in a chain. |
+| Unload_ASR_Model | BOOLEAN | Unload the ASR model cache (default `True`). |
+| Unload_TTS_Model | BOOLEAN | Unload the TTS model cache (default `True`). |
+| **Output** | **Type** | **Description** |
+| any | * | Same value as `anything` (pass-through). |
 
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) and [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS): Official open-source repository by Alibaba Qwen team.
 - [ComfyUI-Qwen3-ASR](https://github.com/DarioFT/ComfyUI-Qwen3-ASR): A nice and clean ComfyUI node by DarioFT.
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
 
