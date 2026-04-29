@@ -142,6 +142,9 @@ EN_DELIMITERS = [',', '.', '!', '?', ';', ':',]
 
 
 def split_string_regex(text, delimiters):
+    text = re.sub(r'(?<=\d)\.(?=\d)', '', text)
+    text = re.sub(r'(?<=\d):(?=\d)', '', text)
+    # print("text", text)
     pattern = '|'.join(re.escape(d) for d in delimiters)
     segments = re.split(f'({pattern})', text)
     result = []
@@ -169,6 +172,7 @@ def get_seg_timestamps(segments, forced_aligns):
         word_list = [t for t in re.split(separators, segment) if t]
         final_word_list = []
         final_word_list_2 = []
+        final_word_list_3 = []
 
         for word in word_list:
             tokens = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+|[^\\s\u4e00-\u9fff a-zA-Z0-9]', word)
@@ -188,9 +192,23 @@ def get_seg_timestamps(segments, forced_aligns):
             else:
                 final_word_list_2.extend(list(final_word))
 
+        # 补丁：把 final_word_list_2 中被拆开的连续数字重新合并
+        num_buffer = ""
+        for idx, item in enumerate(final_word_list_2):
+            if item.isdigit():
+                num_buffer += item
+                if idx == len(final_word_list_2) - 1 or not final_word_list_2[idx + 1].isdigit():
+                    # 如果是最后一个字符 或者 后面的字符不是数字
+                    final_word_list_3.append(num_buffer)
+                    num_buffer = ""
+                else:
+                    continue
+            else:
+                final_word_list_3.append(item)
+        segments_word_list.append(final_word_list_3)
+        # print(" ", i, "final_word_list", final_word_list_3)
 
-        segments_word_list.append(final_word_list_2)
-        # print(" ", i, "final_word_list", final_word_list)
+
 
         if end_char == start_char == segment:
             segments_one_word.append(True)
@@ -200,6 +218,7 @@ def get_seg_timestamps(segments, forced_aligns):
     srt_time_stamps = []
     # word_index = 0
     forced_aligns_cp = forced_aligns
+    # print("forced_aligns_cp[-200:-100]", forced_aligns_cp[-200:-100])
     for i, segment in enumerate(segments):
         if segments_one_word[i]:
             srt_time_stamps.append((forced_aligns_cp[0].start_time, forced_aligns_cp[0].end_time))
@@ -215,7 +234,7 @@ def get_seg_timestamps(segments, forced_aligns):
         # print("i=", i)
         # print("segments_word_list[i]", segments_word_list[i])
         end_char = segments_word_list[i][-1][-1] # 取最后一个word的最后一个字符
-        if is_english_char(end_char): # 检查是否为英文
+        if is_english_char(end_char) or end_char.isdigit(): # 检查是否为英文 或者数字
             end_char = segments_word_list[i][-1]
 
         while not end_time:
@@ -236,6 +255,7 @@ def get_seg_timestamps(segments, forced_aligns):
                         # 找到了最后一个字符的force align了
                         end_time = forced_aligns_cp[word_jdx].end_time
                         forced_aligns_cp = forced_aligns_cp[word_jdx+1:]
+                        # print("word_jdx", word_jdx)
                         # word_index = 0
                         break
 
