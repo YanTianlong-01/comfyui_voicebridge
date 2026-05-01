@@ -14,7 +14,7 @@
 ## 🔄 Workflow
 This node integrates ASR (Automatic Speech Recognition), LLM (Large Language Model), and TTS (Text-to-Speech) technologies to provide a complete speech translation pipeline.
 
-[Online Workflow](https://www.runninghub.cn/post/2021530085228023809/aiDetail/?inviteCode=rh-v1455)
+[Online Workflow](https://www.runninghub.ai/post/2050059053363154946?inviteCode=rh-v1455)
 ### ASR + LLM + TTS Workflow
 ![](./assets/workflow.png)
 
