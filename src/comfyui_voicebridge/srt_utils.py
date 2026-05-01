@@ -11,6 +11,14 @@ from typing import List, Optional, Tuple
 import folder_paths
 
 
+DEBUG = False
+
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
+
+
+
 # ----------------------------------------------------- SRT to Audio Process --------------------------------------------
 @dataclass
 class SubtitleEntry:
@@ -144,7 +152,7 @@ EN_DELIMITERS = [',', '.', '!', '?', ';', ':',]
 def split_string_regex(text, delimiters):
     text = re.sub(r'(?<=\d)\.(?=\d)', '', text)
     text = re.sub(r'(?<=\d):(?=\d)', '', text)
-    # print("text", text)
+    debug_print("text", text)
     pattern = '|'.join(re.escape(d) for d in delimiters)
     segments = re.split(f'({pattern})', text)
     result = []
@@ -206,7 +214,7 @@ def get_seg_timestamps(segments, forced_aligns):
             else:
                 final_word_list_3.append(item)
         segments_word_list.append(final_word_list_3)
-        # print(" ", i, "final_word_list", final_word_list_3)
+        debug_print(" ", i, "final_word_list", final_word_list_3)
 
 
 
@@ -218,7 +226,10 @@ def get_seg_timestamps(segments, forced_aligns):
     srt_time_stamps = []
     # word_index = 0
     forced_aligns_cp = forced_aligns
-    # print("forced_aligns_cp[-200:-100]", forced_aligns_cp[-200:-100])
+    forced_cp_text_list = []
+    if DEBUG:
+        forced_cp_text_list = [fa.text for fa in forced_aligns_cp]
+    debug_print("forced_aligns_cp", forced_cp_text_list)
     for i, segment in enumerate(segments):
         if segments_one_word[i]:
             srt_time_stamps.append((forced_aligns_cp[0].start_time, forced_aligns_cp[0].end_time))
@@ -231,8 +242,8 @@ def get_seg_timestamps(segments, forced_aligns):
 
 
         
-        # print("i=", i)
-        # print("segments_word_list[i]", segments_word_list[i])
+        debug_print("i=", i)
+        debug_print("segments_word_list[i]", segments_word_list[i])
         end_char = segments_word_list[i][-1][-1] # 取最后一个word的最后一个字符
         if is_english_char(end_char) or end_char.isdigit(): # 检查是否为英文 或者数字
             end_char = segments_word_list[i][-1]
@@ -240,24 +251,29 @@ def get_seg_timestamps(segments, forced_aligns):
         while not end_time:
             end_char_count = segments_word_list[i].count(end_char)
 
-            # print("end_char", end_char)
-            # print("end_char_count", end_char_count)
+            debug_print("end_char", end_char)
+            debug_print("end_char_count", end_char_count)
             count_char = 1
-            # print("forced_aligns_cp[0]", forced_aligns_cp[0].text)
-            # print("len(forced_aligns_cp)", len(forced_aligns_cp))
+            debug_print("forced_aligns_cp[0]", forced_aligns_cp[0].text)
+            debug_print("len(forced_aligns_cp)", len(forced_aligns_cp))
             for word_jdx in range(0, len(forced_aligns_cp)): # 从前往后检索
                 if forced_aligns_cp[word_jdx].text == end_char:
                     if count_char < end_char_count:
                         # 找到了一样的，但不是最后那个
-                        count_char += 1
-                        # word_index += 1
+                        count_char += 1             
                     else:
                         # 找到了最后一个字符的force align了
                         end_time = forced_aligns_cp[word_jdx].end_time
                         forced_aligns_cp = forced_aligns_cp[word_jdx+1:]
-                        # print("word_jdx", word_jdx)
-                        # word_index = 0
+                        debug_print("word_jdx", word_jdx)
                         break
+                elif word_jdx == len(segments_word_list[i]) - 1:
+                # 如果是最后一个字符，说明匹配失败，有一种情况是forced-aligns把这个句子的最后一个词和下一个句子的第一个词合并了，所以需要把下一个句子的第一个词也加进来
+                # （这个是QwenASR自己的问题，比如句子是 ... Gap。Tempo ... 最后出来的forced-aligns竟然是 GapTempo被分成一个词了。）
+                    end_time = forced_aligns_cp[word_jdx].end_time
+                    forced_aligns_cp = forced_aligns_cp[word_jdx:]
+                    debug_print("word_jdx", word_jdx)
+                    break
 
             # 如果检索完整个forced aligns都没有找到，说明匹配失败
             if not end_time:
