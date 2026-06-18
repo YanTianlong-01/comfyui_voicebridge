@@ -9,6 +9,7 @@ from pydub import AudioSegment
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import folder_paths
+from dataclasses import replace
 
 
 DEBUG = False
@@ -272,6 +273,10 @@ def get_seg_timestamps(segments, forced_aligns):
                 # （这个是QwenASR自己的问题，比如句子是 ... Gap。Tempo ... 最后出来的forced-aligns竟然是 GapTempo被分成一个词了。）
                     end_time = forced_aligns_cp[word_jdx].end_time
                     forced_aligns_cp = forced_aligns_cp[word_jdx:]
+                    # 把下一个句子的第一个词和这个句子的最后一个词拆分开来
+                    end_char_len = len(end_char)
+                    forced_aligns_cp[0] = replace(forced_aligns_cp[0],text=forced_aligns_cp[0].text[end_char_len:])
+                    forced_aligns_cp[0] = replace(forced_aligns_cp[0],start_time=forced_aligns_cp[0].end_time)
                     debug_print("word_jdx", word_jdx)
                     break
 
@@ -288,6 +293,7 @@ def get_seg_timestamps(segments, forced_aligns):
                 end_char = segments_word_list[i][-1]
 
         srt_time_stamps.append((start_time, end_time))
+        debug_print("start_time, end_time", start_time, end_time)
     return srt_time_stamps
 
 
